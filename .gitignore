@@ -1,0 +1,28 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# IDE files
+.idea/
+.vscode/
+
+# Environment config
+.env
+
+# Logs and system files
+*.log
+.DS_Store
+
+# Compiled Python
+*.so
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# OS generated
+Thumbs.db
