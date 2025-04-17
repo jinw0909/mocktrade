@@ -31,7 +31,7 @@ class MakeErrorType:
                   'Server Error' if error_code == 1 else (
                   'Not Connet ' if error_code == 100 else (
                   'Not Profile information ' if error_code == 102 else (
-                  'Already registered' if error_code == 103 else (
+                  'check marging type' if error_code == 103 else (
                   'Insufficient amount' if error_code == 104 else (
                   'Action already processed' if error_code == 105 else (
                   'datetime error' if error_code == 106 else (

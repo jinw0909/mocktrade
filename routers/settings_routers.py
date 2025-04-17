@@ -13,12 +13,12 @@ async def api_test():
     # '''
     
     # ''' 
-    # mysql = MYSQLAdapter()
+    mysql = MYSQLAdapter()
     
-    # try:
-    #     mysql.get_signal()
-    # except Exception as e:
-    #     print(e)
+    try:
+        mysql.get_signal()
+    except Exception as e:
+        print(e)
     
     return JSONResponse(content = {"message": "Hello Test"}, status_code = 200) 
     
