@@ -14,13 +14,16 @@ router = APIRouter()
 async def api_test():
     # '''
 
-    # ''' 
-    # mysql = MYSQLAdapter()
-
-    # try:
-    #     mysql.get_signal()
-    # except Exception as e:
-    #     print(e)
+    # '''
+    mysql = MySQLAdapter()
+    
+    try:
+        mysql.get_signal()
+    except Exception as e:
+        print(e)
+    
+    return JSONResponse(content = {"message": "Hello Test"}, status_code = 200) 
+    
 
     return JSONResponse(content={"message": "Hello Test"}, status_code=200)
 

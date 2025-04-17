@@ -14,7 +14,7 @@ router= APIRouter()
 
 
 @router.get('/get_position_list', summary='POSITION', tags=['USER API'])
-async def api_select(user_no: int, symbol: str, margin_type: int, leverage: int,price:float, usdt: Optional[float] = 0, amount: Optional[int] = 0):
+async def api_select(user_no: int,symbol:str=''):
 
     
     """
@@ -24,7 +24,7 @@ async def api_select(user_no: int, symbol: str, margin_type: int, leverage: int,
     mysql=MySQLAdapter()
     
     try:    
-        mysql.buy_limit_order(user_no,symbol,margin_type,leverage,price,usdt,amount)
+        mysql.get_position_list(user_no,symbol)
             
 
 
@@ -33,6 +33,78 @@ async def api_select(user_no: int, symbol: str, margin_type: int, leverage: int,
 
 
     return JSONResponse(mysql.return_dict_data, status_code=mysql.status_code)
+
+
+
+@router.get('/get_order_list', summary='ORDER HISTORY', tags=['USER API'])
+async def api_select(user_no: int):
+
+    
+    """
+
+    
+    """
+    mysql=MySQLAdapter()
+    
+    try:    
+        mysql.get_order_list(user_no)
+            
+
+
+    except Exception as e:
+        print(e)
+
+
+    return JSONResponse(mysql.return_dict_data, status_code=mysql.status_code)
+
+
+@router.get('/get_openorder_list', summary='OPEN ORDER', tags=['USER API'])
+async def api_select(user_no: int,symbol:str =''):
+
+    
+    """
+
+    
+    """
+    mysql=MySQLAdapter()
+    
+    try:    
+        mysql.get_openorder_list(user_no,symbol)
+            
+
+
+    except Exception as e:
+        print(e)
+
+
+    return JSONResponse(mysql.return_dict_data, status_code=mysql.status_code)
+
+
+
+@router.get('/get_userbalance_list', summary='USER BALANCE', tags=['USER API'])
+async def api_select(user_no: int):
+
+    
+    """
+
+    
+    """
+    mysql=MySQLAdapter()
+    
+    try:    
+        mysql.get_userbalance_list(user_no)
+            
+
+
+    except Exception as e:
+        print(e)
+
+
+    return JSONResponse(mysql.return_dict_data, status_code=mysql.status_code)
+
+
+
+
 
 
 
