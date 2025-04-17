@@ -95,11 +95,11 @@ class MySQLAdapter:
                     # 쿼리에서 타이핑 오류 수정: usder_id -> user_id
                     sql = """
                     INSERT INTO order_history
-                    (user_id, symbol, type, margin_type, side, price, magin,amount, leverage, status, insert_time, update_time) 
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (user_id, symbol, type, margin_type, side, price, magin,amount, leverage, status, insert_time, update_time, order_price) 
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """
                     # cursor.execute를 통해 인자 전달
-                    cursor.execute(sql, (user_no, symbol, order_type, margin_type, side, price, margin, amount, leverage, status, aaa1, aaa1))
+                    cursor.execute(sql, (user_no, symbol, order_type, margin_type, side, price, margin, amount, leverage, status, aaa1, aaa1, price))
 
                     conn.commit()  # 트랜잭션 커밋
 
@@ -169,8 +169,7 @@ class MySQLAdapter:
     
     
     def get_signal(self):
-        
-        
+
         # self.return_dict_data=dict(page=0,size=0,totalPages=0,totalCount=0,results=[], reCode=1, message='Server Error')
         conn = self._get_connection()
         check = MakeErrorType()
@@ -208,8 +207,8 @@ class MySQLAdapter:
             # self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
             # self.status_code=200   
                     
-                       
-               
+
+
         except Exception as e:
             print(e)
             pass 
@@ -422,7 +421,7 @@ class MySQLAdapter:
                     
                     
               
-                    
+
                     # print(result)
               
                     if len(result)>0:
@@ -496,24 +495,24 @@ class MySQLAdapter:
         try:
             if user:  # user가 True인 경우에만 처리
                 balance=self.get_diff_balance(user_no)
-                new_side=self.get_side(user_no,'sell',symbol)
-                print('new-size',new_side)
-                if new_side ==True:
+                # new_side=self.get_side(user_no,'sell',symbol)
+                # print('new-size',new_side)
+                # if new_side ==True:
+                #
+                #     print('실패')
+                #     self.return_dict_data['reCode']=30012
+                #     self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                #     self.status_code=423
+                #
+                #     return False
+                
 
-                    print('실패')
-                    self.return_dict_data['reCode']=30012
-                    self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
-                    self.status_code=423
-                
-                    return False
-                
-                
-                
+
                 if price:  # price 값이 None이 아닌 경우에만 진행
-       
-                    
-                
-                    
+
+
+
+
                     if usdt > 0:  # usdt를 사용하는 경우
                         
                         print('여기')
@@ -537,7 +536,7 @@ class MySQLAdapter:
                     if new_balance >= 0:
                         print('new_balance:',new_balance)
                         
-                        self.inser_oder_history(user_no, symbol, 'market', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 0)
+                        self.inser_oder_history(user_no, symbol, 'limit', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 0)
                         self.return_dict_data['results']=[]
                         self.return_dict_data['reCode']=0
                         self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
@@ -565,16 +564,16 @@ class MySQLAdapter:
         try:
             if user:  # user가 True인 경우에만 처리
                 balance=self.get_diff_balance(user_no)
-                new_side=self.get_side(user_no,'buy',symbol)
-                print('new-size',new_side)
-                if new_side ==True:
-
-                    print('실패')
-                    self.return_dict_data['reCode']=30012
-                    self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
-                    self.status_code=423
-                
-                    return False
+                # new_side=self.get_side(user_no,'buy',symbol)
+                # print('new-size',new_side)
+                # if new_side ==True:
+                #
+                #     print('실패')
+                #     self.return_dict_data['reCode']=30012
+                #     self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                #     self.status_code=423
+                #
+                #     return False
                 
                 
                 
@@ -606,7 +605,7 @@ class MySQLAdapter:
                     if new_balance >= 0:
                         print('new_balance:',new_balance)
                     
-                        self.inser_oder_history(user_no, symbol, 'market', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 0)
+                        self.inser_oder_history(user_no, symbol, 'limit', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 0)
                         self.return_dict_data['results']=[]
                         self.return_dict_data['reCode']=0
                         self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
@@ -638,13 +637,13 @@ class MySQLAdapter:
                 balance=self.get_diff_balance(user_no)
                 new_side=self.get_side(user_no,'sell',symbol)
                 print('new-size',new_side, 'balance',balance)
-                if new_side ==True:
+                if new_side == True:
 
                     print('실패')
                     self.return_dict_data['reCode']=30012
                     self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
                     self.status_code=423
-                
+
                     return False
                 
                 

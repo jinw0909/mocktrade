@@ -34,7 +34,7 @@ async def api_select():
 
 
 @router.post('/buy_limit_order', summary='ORDER', tags=['ORDER API'])
-async def api_select(user_no: int, symbol: str, margin_type: int, leverage: int,price:float, usdt: Optional[float] = 0, amount: Optional[int] = 0):
+async def api_select(user_no: int, symbol: str, margin_type: int, leverage: int,price:float, usdt: Optional[float] = 0, amount: Optional[float] = 0):
 
     
     """
@@ -58,7 +58,7 @@ async def api_select(user_no: int, symbol: str, margin_type: int, leverage: int,
 
 
 @router.post('/sell_limit_order', summary='ORDER', tags=['ORDER API'])
-async def api_select(user_no: int, symbol: str, margin_type: int, leverage: int,price:float, usdt: Optional[float] = 0, amount: Optional[int] = 0):
+async def api_select(user_no: int, symbol: str, margin_type: int, leverage: int,price:float, usdt: Optional[float] = 0, amount: Optional[float] = 0):
 
     
     """

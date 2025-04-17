@@ -6,27 +6,28 @@ from pydantic import BaseModel
 from utils.settings import MySQLAdapter
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Optional
-router= APIRouter()
 
-@router.get('/test', summary = 'test router', tags = ['SETTINGS API'])
+router = APIRouter()
+
+
+@router.get('/test', summary='test router', tags=['SETTINGS API'])
 async def api_test():
     # '''
-    
+
     # ''' 
     # mysql = MYSQLAdapter()
-    
+
     # try:
     #     mysql.get_signal()
     # except Exception as e:
     #     print(e)
-    
-    return JSONResponse(content = {"message": "Hello Test"}, status_code = 200) 
-    
 
-@router.post('/tpsl', summary = 'set tp/sl of a single order', tags = ['SETTINGS API'])
+    return JSONResponse(content={"message": "Hello Test"}, status_code=200)
+
+
+@router.post('/tpsl', summary='set tp/sl of a single order', tags=['SETTINGS API'])
 async def api_tpsl(order_no: int, user_no: int, tp: float, sl: float):
-     
-    mysql = MYSQLAdapter()
+    mysql = MySQLAdapter()
     responseMessage = ''
 
     try:
@@ -42,10 +43,30 @@ async def api_tpsl(order_no: int, user_no: int, tp: float, sl: float):
     except Exception as e:
         print(e)
         responseMessage = f"Exception occurred: {str(e)}"
-    
-    return JSONResponse(content = {"message": responseMessage}, status_code = 200) 
 
-    
-@router.post('/reload', summary = 'reload test', tags = ["SETTINGS API"])
-async def api_realod():
-    return JSONResponse(content = {"message": "reload test"}, status_Code = 200)
+    return JSONResponse(content={"message": responseMessage}, status_code=200)
+
+
+@router.post('/getUser', summary='get user test', tags=["SETTINGS API"])
+async def api_getUser(user_no: int):
+    mysql = MySQLAdapter()
+    try:
+        user = mysql.get_user(user_no)
+        return user
+    except Exception as e:
+        print(e)
+    # return JSONResponse(content = {"message": "reload test"}, status_Code = 200)
+
+
+@router.post('/fetchPrice', summary='fetch crypto price', tags=["SETTINGS API"])
+async def api_fetchPrice():
+    mysql = MySQLAdapter()
+    try:
+        fetchResult = mysql.fetch_price()
+        return fetchResult
+    except Exception as e:
+        print(e)
+        return "Error during crypto price fetching"
+
+
+

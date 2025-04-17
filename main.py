@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from starlette.responses import JSONResponse
 # from routers import ticker, que_chart, candle, analysis
 # from models.models import IntervalModel
-from routers import trei_routers, settings_routers,frontapi_routers
+from routers import trei_routers, settings_routers, frontapi_routers, execute_routers
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 # from utils.ticker_func import TickerList
@@ -22,6 +22,7 @@ app.add_middleware(
 app.include_router(trei_routers.router, prefix='/trading')
 app.include_router(frontapi_routers.router, prefix='/user')
 app.include_router(settings_routers.router, prefix='/settings')
+app.include_router(execute_routers.router, prefix='/execute')
 
 # @app.get('/list', tags=['코인 리스트'], summary='코인 항목')
 # async def ticker_list():
