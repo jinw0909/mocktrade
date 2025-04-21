@@ -33,7 +33,7 @@ class MakeErrorType:
                   'Not Profile information ' if error_code == 102 else (
                   'check marging type' if error_code == 103 else (
                   'Insufficient amount' if error_code == 104 else (
-                  'Action already processed' if error_code == 105 else (
+                  'no user' if error_code == 105 else (
                   'datetime error' if error_code == 106 else (
                   'size error' if error_code == 107 else(
                   'set_ price error' if error_code == 30006 else(

@@ -3,18 +3,14 @@ from starlette.responses import JSONResponse
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from utils.frontapi import MySQLAdapter
+from utils.frontapi import MySQLAdapter,MakeErrorType
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Optional
 router= APIRouter()
 
 
-
-
-
-
-@router.get('/get_position_list', summary='POSITION', tags=['USER API'])
-async def api_select(user_no: int,symbol:str=''):
+@router.get('/user_info', summary='USER INFO', tags=['USER API'])
+async def api_select(retri_id:str ):
 
     
     """
@@ -24,7 +20,110 @@ async def api_select(user_no: int,symbol:str=''):
     mysql=MySQLAdapter()
     
     try:    
-        mysql.get_position_list(user_no,symbol)
+        mysql.get_user_info(retri_id)
+            
+
+
+    except Exception as e:
+        print(e)
+
+
+    return JSONResponse(mysql.return_dict_data, status_code=mysql.status_code)
+
+
+
+
+@router.post('/start_trading', summary='START', tags=['USER API'])
+async def api_select(retri_id:str ):
+
+    
+    """
+
+    
+    """
+    mysql=MySQLAdapter()
+    
+    try:    
+        mysql.start_user(retri_id)
+            
+
+
+    except Exception as e:
+        print(e)
+
+
+    return JSONResponse(mysql.return_dict_data, status_code=mysql.status_code)
+
+
+
+@router.post('/reset_seed', summary='SEED RESET', tags=['USER API'])
+async def api_select(retri_id: str):
+
+    
+    """
+
+    
+    """
+    mysql=MySQLAdapter()
+    
+    try:    
+        mysql.get_resetseed(retri_id)
+            
+
+
+    except Exception as e:
+        print(e)
+
+
+    return JSONResponse(mysql.return_dict_data, status_code=mysql.status_code)
+
+
+
+@router.post('/reset_user', summary='RESET USER', tags=['USER API'])
+async def api_select(retri_id: str):
+
+    
+    """
+
+    
+    """
+    mysql=MySQLAdapter()
+    
+    try:    
+        mysql.reset_user(retri_id)
+            
+
+
+    except Exception as e:
+        print(e)
+
+
+    return JSONResponse(mysql.return_dict_data, status_code=mysql.status_code)
+
+
+
+@router.get('/get_position_list', summary='POSITION', tags=['USER API'])
+async def api_select(user_no: str,symbol:str=''):
+
+    
+    """
+
+    
+    """
+    mysql=MySQLAdapter()
+    check = MakeErrorType()
+    try:
+        data=mysql.get_check_user(user_no)
+        if len(data)>0  :
+          
+            user_id=data['id'].iloc[0]    
+            mysql.get_position_list(user_id,symbol)
+            
+        else:
+            
+            mysql.return_dict_data['reCode']=105
+            mysql.return_dict_data['message'] = check.error(mysql.return_dict_data['reCode'])
+            mysql.status_code=423
             
 
 
@@ -37,7 +136,7 @@ async def api_select(user_no: int,symbol:str=''):
 
 
 @router.get('/get_order_list', summary='ORDER HISTORY', tags=['USER API'])
-async def api_select(user_no: int):
+async def api_select(user_no: str):
 
     
     """
@@ -45,11 +144,20 @@ async def api_select(user_no: int):
     
     """
     mysql=MySQLAdapter()
-    
-    try:    
-        mysql.get_order_list(user_no)
+    check = MakeErrorType()
+    try:
+        data=mysql.get_check_user(user_no)
+        if len(data)>0  :
+          
+            user_id=data['id'].iloc[0]     
+            mysql.get_order_list(user_id)
             
-
+        else:
+            
+            mysql.return_dict_data['reCode']=105
+            mysql.return_dict_data['message'] = check.error(mysql.return_dict_data['reCode'])
+            mysql.status_code=423
+            
 
     except Exception as e:
         print(e)
@@ -59,7 +167,7 @@ async def api_select(user_no: int):
 
 
 @router.get('/get_openorder_list', summary='OPEN ORDER', tags=['USER API'])
-async def api_select(user_no: int,symbol:str =''):
+async def api_select(user_no: str,symbol:str =''):
 
     
     """
@@ -67,11 +175,19 @@ async def api_select(user_no: int,symbol:str =''):
     
     """
     mysql=MySQLAdapter()
-    
-    try:    
-        mysql.get_openorder_list(user_no,symbol)
+    check = MakeErrorType()
+    try:
+        data=mysql.get_check_user(user_no)
+        if len(data)>0  :
+          
+            user_id=data['id'].iloc[0] 
+            mysql.get_openorder_list(user_id,symbol)
             
-
+        else:
+            
+            mysql.return_dict_data['reCode']=105
+            mysql.return_dict_data['message'] = check.error(mysql.return_dict_data['reCode'])
+            mysql.status_code=423
 
     except Exception as e:
         print(e)
@@ -82,7 +198,7 @@ async def api_select(user_no: int,symbol:str =''):
 
 
 @router.get('/get_userbalance_list', summary='USER BALANCE', tags=['USER API'])
-async def api_select(user_no: int):
+async def api_select(user_no: str):
 
     
     """
@@ -90,10 +206,18 @@ async def api_select(user_no: int):
     
     """
     mysql=MySQLAdapter()
-    
-    try:    
-        mysql.get_userbalance_list(user_no)
+    check = MakeErrorType()
+    try:  
+        data=mysql.get_check_user(user_no)
+        if len(data)>0  :
+          
+            user_id=data['id'].iloc[0]   
+            mysql.get_userbalance_list(user_id)
+        else:
             
+            mysql.return_dict_data['reCode']=105
+            mysql.return_dict_data['message'] = check.error(mysql.return_dict_data['reCode'])
+            mysql.status_code=423   
 
 
     except Exception as e:
