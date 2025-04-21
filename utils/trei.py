@@ -44,7 +44,7 @@ class MySQLAdapter:
         self.status_code=200
         self.status=0
         self.check=0
-        
+        self.price1=0
         
     # DB Connection 확인
     def _get_connection(self):
@@ -109,6 +109,38 @@ class MySQLAdapter:
         finally:
             if conn:
                 conn.close()  # 항상 연결 종료
+                
+                
+    def insert_trade_log(self, user_no, symbol, order_type, margin_type, side, price, margin, amount, leverage, tp, sl, status, message):
+        conn = self._get_connection()
+
+        # 현재 시간 datetime 객체로 직접 사용
+        now = datetime.now()
+
+        try:
+            if conn:
+                with conn.cursor() as cursor:
+                    sql = """
+                    INSERT INTO order_log
+                    (user_id, symbol, type, margin_type, side, price, magin, amount, leverage, insert_time, update_time, tp, sl, status, message) 
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """
+                    cursor.execute(sql, (
+                        user_no, symbol, order_type, margin_type, side,
+                        price, margin, amount, leverage,
+                        now, now, tp, sl, status, message
+                    ))
+                    conn.commit()
+
+            else:
+                print("Database connection failed.")
+
+        except Exception as e:
+            print("Database error:", str(e))
+
+        finally:
+            if conn:
+                conn.close()
                 
                 
     def inser_position_history(self, user_no, symbol, size,amount, entry_price, liq_price, margin_ratio, margin, pnl,margin_type,side ,leverage, status,tp,sl):
@@ -307,6 +339,41 @@ class MySQLAdapter:
                         
                         
                         return result
+            
+        except Exception as e:
+            print(e)
+            pass 
+        
+    
+    
+    
+    def get_check_user(self,user_no):
+        
+        
+        # self.return_dict_data=dict(page=0,size=0,totalPages=0,totalCount=0,results=[], reCode=1, message='Server Error')
+        conn = self._get_connection()
+        check = MakeErrorType()
+        new_list=[]
+       
+        try:
+            if conn:
+                with conn.cursor() as cursor:
+                    
+                    sql = f"SELECT * FROM user where retri_id='{user_no}' and status=0;"
+                
+                    cursor.execute(sql)
+                    result=cursor.fetchall()
+                    result=pd.DataFrame(result)
+                    conn.close()
+                    # print(result)
+                    
+                    if len(result)>0:
+                        
+                        
+                        return result
+                    
+                    else:
+                        return []
             
         except Exception as e:
             print(e)
@@ -525,7 +592,7 @@ class MySQLAdapter:
             if conn:
                 with conn.cursor() as cursor:
                     
-                    sql = f"SELECT * FROM user where id={user_no}"
+                    sql = f"SELECT * FROM user where id={user_no} and status=0"
                     
                     sql1 = f"SELECT * FROM user_balance_history where user_id={user_no} order by datetime desc limit 1"
                 
@@ -556,6 +623,35 @@ class MySQLAdapter:
         except Exception as e:
             print(e)
             pass 
+        
+        
+    def update_pnl(self,id,profit):
+        # return_num = 0
+        conn = self._get_connection()
+        # aaa=datetime.strftime(self.now,"%Y-%m-%d %H:%M:%S")
+        
+        # new_aaa=datetime.strftime((self.now-timedelta(hours=4)),"%Y%m%d%H")
+        
+        try:
+            if conn:
+                with conn.cursor() as cursor:
+                 
+                    sql = """UPDATE position_history SET pnl = %s WHERE id = %s"""
+            
+                    # 파라미터를 튜플로 전달 (symbol을 마지막으로 전달)
+                    values = (profit,id)
+
+                    # 쿼리 실행
+                    cursor.execute(sql, values)
+
+                    # 커밋 후 커넥션 종료
+                    conn.commit()
+                
+                # 커넥션 종료는 with 블록 밖에서
+                conn.close()   
+        except Exception as e:
+            print(e)
+            pass
     
     def calculate_cross_liquidation_price(entry_price, position_usdt, wallet_balance, position_type="long", maintenance_margin_rate=0.005):
         """
@@ -829,7 +925,7 @@ class MySQLAdapter:
                 
                 if price:  # price 값이 None이 아닌 경우에만 진행
                     price = float(price.decode())  # 바이트 문자열을 디코딩하여 float로 변환
-                    
+                    self.price1=price
                     print(balance)
                     print(price)
                     
@@ -866,7 +962,7 @@ class MySQLAdapter:
                                 print('격리 청산가',liq_price,'price',price,'lev',leverage,'마진비율')
                                 self.inser_oder_history(user_no, symbol, 'market', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 1,price,tp,sl)
                                 # self.inser_user_balance(user_no,new_balance)
-                                self.inser_position_history(user_no,symbol,usdt,new_amount,price,liq_price,0,new_usdt,0,margin_type,'buy',leverage,1,tp,sl)
+                                self.inser_position_history(user_no,symbol,usdt,new_amount,price,liq_price,0,new_usdt,0,margin_type,'buy',leverage,1,0,0)
                              
                             
                             else:
@@ -895,19 +991,19 @@ class MySQLAdapter:
                                 self.inser_oder_history(user_no, symbol, 'market', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 1,price,tp,sl)
                                 # self.inser_user_balance(user_no,new_balance)
                                     
-                                self.inser_position_history(user_no,symbol,usdt,new_amount,price,liq_price,0,new_usdt,0,margin_type,'buy',leverage,1,tp,sl)
+                                self.inser_position_history(user_no,symbol,usdt,new_amount,price,liq_price,0,new_usdt,0,margin_type,'buy',leverage,1,0,0)
                                 
                             position=self.get_position_return(user_no,symbol)
                             id=position['id'].iloc[0]      
                             if tp !=0:
                                 print('tp주문')
                                 
-                                self.inser_oder_history(user_no, symbol, 'tp', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 0,price,tp,sl,id)
+                                self.inser_oder_history(user_no, symbol, 'tp', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 0,price,tp,sl,id)
 
                             if sl !=0:
                                 
                                 print('sl주분')
-                                self.inser_oder_history(user_no, symbol, 'sl', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 0,price,tp,sl,id)
+                                self.inser_oder_history(user_no, symbol, 'sl', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 0,price,tp,sl,id)
                                 
                                 
                             print('asdasdasdassdadsa')
@@ -930,6 +1026,8 @@ class MySQLAdapter:
                                 quantity=position['amount'].iloc[0]+new_amount
                                 new_price=new_size/quantity
                                 new_margin=position['margin'].iloc[0]+new_usdt
+                                tp1=position['tp'].iloc[0]
+                                sl1=position['sl'].iloc[0]
                                 
                                 print('물타기 체크', new_size, quantity,new_price,new_margin )
                                 
@@ -958,7 +1056,7 @@ class MySQLAdapter:
                                     print(usdt, balance)
                                     liq_price = new_price * (1 - adjusted_balance / new_size)
                                 self.inser_oder_history(user_no, symbol, 'market', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 1,price,tp,sl)
-                                self.inser_position_history(user_no,symbol,new_size,quantity,new_price,liq_price,0,new_margin,0,margin_type,'buy',leverage,1,tp,sl)
+                                self.inser_position_history(user_no,symbol,new_size,quantity,new_price,liq_price,0,new_margin,0,margin_type,'buy',leverage,1,tp1,sl1)
                                 self.update_positon(id)
                                 
                                 id=position['id'].iloc[0]   
@@ -980,11 +1078,12 @@ class MySQLAdapter:
                                 quantity=position['amount'].iloc[0]-new_amount
                                 new_price=new_size/quantity
                                 new_margin=position['margin'].iloc[0]-new_usdt
-                                # tp=position['tp'].iloc[0]
-                                # sl=position['sl'].iloc[0]
+                                tp1=position['tp'].iloc[0]
+                                sl1=position['sl'].iloc[0]
+                                entry_price= position['entry_price'].iloc[0]
+                                new_margin1=position['margin'].iloc[0]
+                                print( '엔트리 프라이스',entry_price,'뉴마진',new_margin1)
                                 
-                                
-                                    
                                 # self.inser_oder_history(user_no, symbol, 'market', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 1,price,tp,sl)
 
                                 if amount >0:
@@ -993,7 +1092,7 @@ class MySQLAdapter:
                                         
                                         if margin_type=='isolated':
                                 
-                                            liq_price=new_price * (1 - (1 / leverage))
+                                            liq_price=entry_price * (1 - (1 / leverage))
                                         else:
                                             
                                             cross_bal=self.get_ava_balance(user_no)
@@ -1004,7 +1103,7 @@ class MySQLAdapter:
                                             print(usdt, balance)
                                             liq_price = new_price * (1 - adjusted_balance / new_size) 
                                         self.cancel_position(user_no,id)
-                                        self.inser_position_history(user_no,symbol,abs(new_size),abs(quantity),float(new_price),float(liq_price),0,abs(new_margin),0,margin_type,'buy',leverage,1,tp,sl)
+                                        self.inser_position_history(user_no,symbol,abs(new_size),abs(quantity),float(price),float(liq_price),0,abs(new_margin),0,margin_type,'buy',leverage,1,0,0)
                                         
                                         position=self.get_position_return(user_no,symbol)
                                         id=position['id'].iloc[0]   
@@ -1026,7 +1125,7 @@ class MySQLAdapter:
                                         print('amount33333333333333333333333333333333333333333333333')
                                         if margin_type=='isolated':
                                 
-                                            liq_price=new_price * (1 + (1 / leverage))
+                                            liq_price=entry_price_price * (1 + (1 / leverage))
                                         else:
                                             
                                             cross_bal=self.get_ava_balance(user_no)
@@ -1037,16 +1136,23 @@ class MySQLAdapter:
                                             print(usdt, balance)
                                             liq_price = new_price * (1 + adjusted_balance / new_size)
                                             
+                                        profit=-((price-entry_price)/entry_price)*leverage
+                                        new_profit1=new_margin1*profit 
+                                        print('pnl 체크 ---------------------------------------------',new_profit1)    
+                                        balance11=self.get_user1(user_no)
+                                        new_balance1=balance11+new_profit1
+                                        self.update_bal(new_balance1,user_no) 
+                                        
                                         self.inser_oder_history(user_no, symbol, 'market', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 1,price,tp,sl)
-                                        self.inser_position_history(user_no,symbol,new_size,quantity,new_price,liq_price,0,new_margin,0,margin_type,'sell',leverage,1,tp,sl)
+                                        self.inser_position_history(user_no,symbol,new_size,quantity,entry_price,liq_price,0,new_margin,0,margin_type,'sell',leverage,1,tp1,sl1)
                                         self.update_positon(id)
-                                
+                                        self.update_pnl(id,new_profit1)
                                 if usdt1 >0:
                                     if  new_margin <0:
                                         print('111111111111111111111111111')
                                         if margin_type=='isolated':
                                 
-                                            liq_price=new_price * (1 - (1 / leverage))
+                                            liq_price=entry_price * (1 - (1 / leverage))
                                         else:
                                             print('111111111111111111111111111')
                                             cross_bal=self.get_ava_balance(user_no)
@@ -1057,7 +1163,7 @@ class MySQLAdapter:
                                             print(usdt, balance)
                                             liq_price = new_price * (1 - adjusted_balance / new_size) 
                                         self.cancel_position(user_no,id)
-                                        self.inser_position_history(user_no,symbol,abs(new_size),abs(quantity),float(new_price),float(liq_price),0,abs(new_margin),0,margin_type,'buy',leverage,1,tp,sl)
+                                        self.inser_position_history(user_no,symbol,abs(new_size),abs(quantity),float(price),float(liq_price),0,abs(new_margin),0,margin_type,'buy',leverage,1,0,0)
                                         
                                         position=self.get_position_return(user_no,symbol)
                                         id=position['id'].iloc[0]   
@@ -1078,7 +1184,7 @@ class MySQLAdapter:
                                         print('33333333333333333333333333333333333333333333333')
                                         if margin_type=='isolated':
                                 
-                                            liq_price=new_price * (1 + (1 / leverage))
+                                            liq_price=entry_price * (1 + (1 / leverage))
                                         else:
                                             
                                             cross_bal=self.get_ava_balance(user_no)
@@ -1089,10 +1195,19 @@ class MySQLAdapter:
                                             print(usdt, balance)
                                             liq_price = new_price * (1 + adjusted_balance / new_size)
                                         # self.close_position(usder_no,id)
-                                        self.inser_oder_history(user_no, symbol, 'market', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 1,price,tp,sl)
-                                        self.inser_position_history(user_no,symbol,new_size,quantity,new_price,liq_price,0,new_margin,0,margin_type,'sell',leverage,1,tp,sl)
-                                        self.update_positon(id)
                                         
+                                         
+                                        profit=-((price-entry_price)/entry_price)*leverage
+                                        new_profit1=new_margin1*profit 
+                                        print('pnl 체크 ---------------------------------------------',new_profit1)
+                                        balance11=self.get_user1(user_no)
+                                        new_balance1=balance11+new_profit1
+                                        self.update_bal(new_balance1,user_no) 
+                                        
+                                        self.inser_oder_history(user_no, symbol, 'market', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 1,price,tp,sl)
+                                        self.inser_position_history(user_no,symbol,new_size,quantity,entry_price,liq_price,0,new_margin,0,margin_type,'sell',leverage,1,tp1,sl1)
+                                        self.update_positon(id)
+                                        self.update_pnl(id,new_profit1)
                                         
                             
                             
@@ -1169,7 +1284,7 @@ class MySQLAdapter:
                 
                 if price:  # price 값이 None이 아닌 경우에만 진행
                     price = float(price.decode())  # 바이트 문자열을 디코딩하여 float로 변환
-                    
+                    self.price1=price
                     print(balance)
                     print(price)
                     
@@ -1206,7 +1321,7 @@ class MySQLAdapter:
                                 print('격리 청산가',liq_price,'price',price,'lev',leverage,'마진비율')
                                 self.inser_oder_history(user_no, symbol, 'market', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 1,price,tp,sl)
                                 # self.inser_user_balance(user_no,new_balance)
-                                self.inser_position_history(user_no,symbol,usdt,new_amount,price,liq_price,0,new_usdt,0,margin_type,'sell',leverage,1,tp,sl)
+                                self.inser_position_history(user_no,symbol,usdt,new_amount,price,liq_price,0,new_usdt,0,margin_type,'sell',leverage,1,0,0)
                                 
                                 
                             
@@ -1232,7 +1347,7 @@ class MySQLAdapter:
                                 
                                 self.inser_oder_history(user_no, symbol, 'market', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 1,price,tp,sl)
                                 # self.inser_user_balance(user_no,new_balance)
-                                self.inser_position_history(user_no,symbol,usdt,new_amount,price,liq_price,0,new_usdt,0,margin_type,'sell',leverage,1,tp,sl)
+                                self.inser_position_history(user_no,symbol,usdt,new_amount,price,liq_price,0,new_usdt,0,margin_type,'sell',leverage,1,0,0)
                                 
                                 
                             position=self.get_position_return(user_no,symbol)
@@ -1268,8 +1383,8 @@ class MySQLAdapter:
                                 quantity=position['amount'].iloc[0]+new_amount
                                 new_price=new_size/quantity
                                 new_margin=position['margin'].iloc[0]+new_usdt
-                                # tp=position['tp'].iloc[0]
-                                # sl=position['sl'].iloc[0]
+                                tp1=position['tp'].iloc[0]
+                                sl1=position['sl'].iloc[0]
                                 print('물타기 체크', new_size, quantity,new_price,new_margin )
                                 
                                 if margin_type=='isolated':
@@ -1298,7 +1413,7 @@ class MySQLAdapter:
                                     liq_price = new_price * (1 + adjusted_balance / new_size)
                                     
                                 self.inser_oder_history(user_no, symbol, 'market', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 1,price,tp,sl)
-                                self.inser_position_history(user_no,symbol,new_size,quantity,new_price,liq_price,0,new_margin,0,margin_type,'sell',leverage,1,tp,sl)  
+                                self.inser_position_history(user_no,symbol,new_size,quantity,new_price,liq_price,0,new_margin,0,margin_type,'sell',leverage,1,tp1,sl1)  
                                 self.update_positon(id)
                                 
                                 position=self.get_position_return(user_no,symbol)
@@ -1322,14 +1437,14 @@ class MySQLAdapter:
                                 quantity=position['amount'].iloc[0]-new_amount
                                 new_price=new_size/quantity
                                 new_margin=position['margin'].iloc[0]-new_usdt
-                                tp=position['tp'].iloc[0]
-                                sl=position['sl'].iloc[0]
+                                tp1=position['tp'].iloc[0]
+                                sl1=position['sl'].iloc[0]
+                                entry_price= position['entry_price'].iloc[0]
+                                new_margin1=position['margin'].iloc[0]
                                 print('반대포지션', 'new_size',new_size,'quantity',quantity,'new_margig',new_margin)
                                 
                              
-                            
-                          
-            
+
                             
                                 # self.inser_oder_history(user_no, symbol, 'market', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 1,price,tp,sl)
                                 # self.inser_user_balance(user_no,new_balance)
@@ -1342,7 +1457,7 @@ class MySQLAdapter:
                                         if margin_type=='isolated':
                                
                                 
-                                            liq_price=new_price * (1 + (1 / leverage))
+                                            liq_price=entry_price * (1 + (1 / leverage))
                                         
                                         else:
                                             
@@ -1354,7 +1469,7 @@ class MySQLAdapter:
                                             print(usdt, balance,new_price)
                                             liq_price = new_price * (1 + adjusted_balance / new_size) 
                                         self.cancel_position(user_no,id)
-                                        self.inser_position_history(user_no,symbol,abs(new_size),abs(quantity),float(new_price),float(liq_price),0,abs(new_margin),0,margin_type,'sell',leverage,1,tp,sl)
+                                        self.inser_position_history(user_no,symbol,abs(new_size),abs(quantity),float(price),float(liq_price),0,abs(new_margin),0,margin_type,'sell',leverage,1,0,0)
                                         
                                         position=self.get_position_return(user_no,symbol)
                                         id=position['id'].iloc[0]   
@@ -1378,7 +1493,7 @@ class MySQLAdapter:
                                         if margin_type=='isolated':
                                
                                 
-                                            liq_price=new_price * (1 - (1 / leverage))
+                                            liq_price=entry_price * (1 - (1 / leverage))
                                         
                                         else:
                                             
@@ -1390,10 +1505,17 @@ class MySQLAdapter:
                                             print("asdadsadasdsaasdsas",usdt, balance)
                                             liq_price = new_price * (1 - adjusted_balance / new_size)
                                             
+                                        profit=((price-entry_price)/entry_price)*leverage
+                                        new_profit1=new_margin1*profit 
+                                        print('pnl 체크 ---------------------------------------------',new_profit1)    
+                                        balance11=self.get_user1(user_no)
+                                        new_balance1=balance11+new_profit1
+                                        self.update_bal(new_balance1,user_no)      
                                         # self.close_position(usder_no,id)
                                         self.inser_oder_history(user_no, symbol, 'market', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 1,price,tp,sl)
-                                        self.inser_position_history(user_no,symbol,new_size,quantity,new_price,liq_price,0,new_margin,0,margin_type,'buy',leverage,1,tp,sl)
+                                        self.inser_position_history(user_no,symbol,new_size,quantity,entry_price,liq_price,0,new_margin,0,margin_type,'buy',leverage,1,tp1,sl1)
                                         self.update_positon(id)
+                                        self.update_pnl(id,new_profit1)
                                 if usdt1 >0:
                                     
                                     if  new_margin <0:
@@ -1401,7 +1523,7 @@ class MySQLAdapter:
                                         if margin_type=='isolated':
                                
                                 
-                                            liq_price=new_price * (1 + (1 / leverage))
+                                            liq_price=entry_price * (1 + (1 / leverage))
                                         else:
                                             
                                             
@@ -1412,8 +1534,8 @@ class MySQLAdapter:
 
                                             print(usdt, balance,new_price)
                                             liq_price = new_price * (1 + adjusted_balance / new_size) 
-                                        self.cancel_position(usser_no,id)
-                                        self.inser_position_history(user_no,symbol,abs(new_size),abs(quantity),float(new_price),float(liq_price),0,abs(new_margin),0,margin_type,'sell',leverage,1,tp,sl)
+                                        self.cancel_position(user_no,id)
+                                        self.inser_position_history(user_no,symbol,abs(new_size),abs(quantity),float(price),float(liq_price),0,abs(new_margin),0,margin_type,'sell',leverage,1,0,0)
                                         
                                         position=self.get_position_return(user_no,symbol)
                                         id=position['id'].iloc[0]   
@@ -1436,7 +1558,7 @@ class MySQLAdapter:
                                         if margin_type=='isolated':
                                
                                 
-                                            liq_price=new_price * (1 + (1 / leverage))
+                                            liq_price=entry_price * (1 - (1 / leverage))
                                         else:
                                         
                                             
@@ -1448,11 +1570,19 @@ class MySQLAdapter:
                                             print("asdadsadasdsaasdsas",usdt, balance)
                                             liq_price = new_price * (1 - adjusted_balance / new_size)
                                             
+                                        profit=((price-entry_price)/entry_price)*leverage
+                                        new_profit1=new_margin1*profit 
+                                        print('pnl 체크 ---------------------------------------------',new_profit1)       
+                                        balance11=self.get_user1(user_no)
+                                        new_balance1=balance11+new_profit1
+                                        self.update_bal(new_balance1,user_no) 
+                                        
+                                        
                                         # self.close_position(usder_no,id)
                                         self.inser_oder_history(user_no, symbol, 'market', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 1,price,tp,sl)
-                                        self.inser_position_history(user_no,symbol,new_size,quantity,new_price,liq_price,0,new_margin,0,margin_type,'buy',leverage,1,tp,sl)
+                                        self.inser_position_history(user_no,symbol,new_size,quantity,entry_price,liq_price,0,new_margin,0,margin_type,'buy',leverage,1,tp1,sl1)
                                         self.update_positon(id)
-                            
+                                        self.update_pnl(id,new_profit1)
                             
                                 
                                 
@@ -1516,16 +1646,88 @@ class MySQLAdapter:
             pass
     
     
+    def get_order_return(self, order_id: int):
+        
+        
+        # self.return_dict_data=dict(page=0,size=0,totalPages=0,totalCount=0,results=[], reCode=1, message='Server Error')
+        conn = self._get_connection()
+        check = MakeErrorType()
+        new_list=[]
+       
+        try:
+            if conn:
+                with conn.cursor() as cursor:
+                    
+                    sql = f"SELECT * FROM order_history where id={order_id};"
+                
+                    cursor.execute(sql)
+                    result=cursor.fetchall()
+                    result=pd.DataFrame(result)
+                    conn.close()
+                    # print(result)
+                    
+                    if len(result)>0:
+                        
+                        
+                        return result
+            
+        except Exception as e:
+            print(e)
+            pass 
     
-    
+    def update_tpsl(self, type, id):
+        if type not in ('tp', 'sl'):
+            print(f"Invalid type: {type}. Must be 'tp' or 'sl'.")
+            return
+
+        conn = None
+        try:
+            conn = self._get_connection()
+            if conn:
+                with conn.cursor() as cursor:
+                    column = 'tp' if type == 'tp' else 'sl'
+                    sql = f"UPDATE position_history SET {column} = %s WHERE id = %s"
+                    values = (0, id)
+                    cursor.execute(sql, values)
+                    conn.commit()
+        except Exception as e:
+            print(f"Error updating {type} for ID {id}: {e}")
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception as e:
+                    print(f"Error closing connection: {e}")
     
     def cancel_order(self,user_no, order_id: int) :
         return_data = dict()
         check = MakeErrorType()
         try:
-            
+            order=self.get_order_return(order_id)
+            print('order',order)
             user = self.get_user(user_no)
+            order_type=order['type'].iloc[0]
+            order_price=order['order_price'].iloc[0]
+            symbol=order['symbol'].iloc[0]
+            
+            position=self.get_position_return(user_no,symbol)
+            print(position)
+            
             if user:
+                if len(position)>0:
+                    position_id=position['id'].iloc[0]
+                    if order_type=='tp' and order_price==0:
+                        self.update_tpsl('tp',position_id)
+                    
+                    
+                    elif order_type=='sl' and order_price==0:
+                        
+                        self.update_tpsl('sl',position_id)
+                        
+                    
+                    
+                
+                
                 self.update_order(order_id)
                 self.return_dict_data['results']=[]
                 self.return_dict_data['reCode']=0
@@ -1725,41 +1927,119 @@ class MySQLAdapter:
             print(e)
             pass            
     
-    def update_tpsl_position(self, user_no,position_id,tp,sl):
+    # def update_tpsl_position(self, user_no,position_id,tp,sl):
+    #     """
+    #     포지션 히스토리에서 해당 id의 상태를 '종료(3)'로 설정하고, 손익(pnl)을 업데이트합니다.
+    #     """
+    #     check = MakeErrorType()
+    #     user = self.get_user(user_no)
+    #     conn = self._get_connection()
+    #     if user:
+    #         try:
+    #             position=self.get_position_return1(user_no,position_id)
+    #             print(position)
+    #             id=position['id'].iloc[0]  
+    #             symbol=position['symbol'].iloc[0] 
+    #             margin_type=position['margin_type'].iloc[0] 
+    #             new_usdt=position['margin'].iloc[0]
+    #             new_amount=position['amount'].iloc[0]
+    #             leverage=position['leverage'].iloc[0]
+                
+    #             if tp !=0:
+    #                 print('tp주문')
+                    
+    #                 self.inser_oder_history(user_no, symbol, 'tp', margin_type, 'buy', 0, new_usdt ,new_amount, leverage, 0,0,tp,sl,position_id)
+                    
+    #                 with conn.cursor() as cursor:
+    #                     sql = """
+    #                         UPDATE position_history
+    #                         SET tp = %s
+    #                         WHERE id = %s
+    #                     """
+    #                     values = (tp, position_id)
+    #                     print('test',values)
+    #                     cursor.execute(sql, values)
+    #                     conn.commit()
+
+    #             if sl !=0:
+                    
+    #                 print('sl주분')
+    #                 self.inser_oder_history(user_no, symbol, 'sl', margin_type, 'buy', 0, new_usdt ,new_amount, leverage, 0,0,tp,sl,position_id)
+    #                 with conn.cursor() as cursor:
+    #                     sql = """
+    #                         UPDATE position_history
+    #                         SET sl = %s
+    #                         WHERE id = %s
+    #                     """
+    #                     values = (sl, position_id)
+    #                     print('test',values)
+    #                     cursor.execute(sql, values)
+    #                     conn.commit()
+
+                    
+                
+    #             self.return_dict_data['results']=[]
+    #             self.return_dict_data['reCode']=0
+    #             self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+
+    #         except Exception as e:
+    #             print(f"DB 업데이트 오류: {e}")
+    
+    def update_tpsl_position(self, user_no, position_id, tp, sl):
         """
-        포지션 히스토리에서 해당 id의 상태를 '종료(3)'로 설정하고, 손익(pnl)을 업데이트합니다.
+        포지션 히스토리에서 해당 id의 상태를 '종료(3)'로 설정하고, TP/SL 값을 업데이트합니다.
         """
-        check = MakeErrorType()
         user = self.get_user(user_no)
-        if user:
-            try:
-                position=self.get_position_return1(user_no,position_id)
-                print(position)
-                id=position['id'].iloc[0]  
-                symbol=position['symbol'].iloc[0] 
-                margin_type=position['margin_type'].iloc[0] 
-                new_usdt=position['margin'].iloc[0]
-                new_amount=position['amount'].iloc[0]
-                leverage=position['leverage'].iloc[0]
-                
-                if tp !=0:
-                    print('tp주문')
-                    
-                    self.inser_oder_history(user_no, symbol, 'tp', margin_type, 'buy', 0, new_usdt ,new_amount, leverage, 0,0,tp,sl,position_id)
+        conn = self._get_connection()
+        check = MakeErrorType()
+        if not user:
+            return  # 사용자 없으면 종료
 
-                if sl !=0:
-                    
-                    print('sl주분')
-                    self.inser_oder_history(user_no, symbol, 'sl', margin_type, 'buy', 0, new_usdt ,new_amount, leverage, 0,0,tp,sl,position_id)
-                    
-                
-                self.return_dict_data['results']=[]
-                self.return_dict_data['reCode']=0
-                self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+        try:
+            position = self.get_position_return1(user_no, position_id)
+            print(position)
 
-            except Exception as e:
-                print(f"DB 업데이트 오류: {e}")
+            pos_data = position.iloc[0]
+            symbol = pos_data['symbol']
+            margin_type = pos_data['margin_type']
+            margin = pos_data['margin']
+            amount = pos_data['amount']
+            leverage = pos_data['leverage']
+            side=pos_data['side']
+            def insert_order_and_update(field_name, value, label,side):
+                if value != 0:
+                    print(f'{label} 주문')
+                    if side=='buy':
+                        new_side='sell'
+                    else:
+                        new_side='buy'
+                    self.inser_oder_history(
+                        user_no, symbol, label, margin_type, new_side, 0,
+                        margin, amount, leverage, 0, 0, tp, sl, position_id
+                    )
+                    with conn.cursor() as cursor:
+                        sql = f"""
+                            UPDATE position_history
+                            SET {field_name} = %s
+                            WHERE id = %s
+                        """
+                        cursor.execute(sql, (value, position_id))
+                        print('업데이트:', (value, position_id))
+                        conn.commit()
+
+            insert_order_and_update('tp', tp, 'tp',side)
+            insert_order_and_update('sl', sl, 'sl',side)
             
+            
+            self.return_dict_data['results']=[]
+            self.return_dict_data['reCode']=0
+            self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+            # self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+            self.status_code=200
+
+        except Exception as e:
+            print('오류 발생:', e)
+                
           
         
     

@@ -172,6 +172,14 @@ class MySQLAdapter:
                 if len(result)>0:
                     for i in result.iterrows():
                         df_data=i[1]
+                        if df_data['type']=='tp':
+                            
+                            price=df_data['tp']
+                        elif df_data['type']=='sl':   
+                            
+                            price=df_data['sl']      
+                        else:
+                            price=df_data['price'] 
                         new_dict={}
                         new_dict['ordid']=df_data['id']
                         new_dict['user_no']=df_data['user_id']
@@ -180,7 +188,7 @@ class MySQLAdapter:
                         # new_dict['deposit']=str(df_data['deposit'])
                         new_dict['margin_type']=str(df_data['margin_type'])
                         new_dict['side']=str(df_data['side'])
-                        new_dict['price']=str(df_data['price'])
+                        new_dict['price']=str(price)
                         new_dict['margin']=str(df_data['magin']*df_data['leverage'])
                         new_dict['amount']=str(df_data['amount'])
                         # new_dict['side']=str(df_data['side'])
@@ -257,6 +265,8 @@ class MySQLAdapter:
                         new_dict['amount']=str(df_data['amount'])
                         # new_dict['side']=str(df_data['side'])
                         new_dict['leverage']=str(df_data['leverage'])
+                        new_dict['tp']=str(df_data['tp'])
+                        new_dict['sl']=str(df_data['sl'])
                         new_dict['datetime']=str(df_data['insert_time'])
                         new_list.append(new_dict)
                     
@@ -343,7 +353,7 @@ class MySQLAdapter:
             if conn:
                 with conn.cursor() as cursor:
                     
-                    sql = f"SELECT * FROM user where id={user_no}"
+                    sql = f"SELECT * FROM user where id={user_no} and status=0"
                     
                     sql1 = f"SELECT * FROM user_balance_history where user_id={user_no} order by datetime desc limit 1"
                 
@@ -413,3 +423,268 @@ class MySQLAdapter:
         return True
     
     
+    
+    def start_user(self, user_no):
+        conn = self._get_connection()
+        check = MakeErrorType()
+        # 현재 시간을 datetime 객체로 가져오기
+        aaa=datetime.strftime(self.now,"%Y-%m-%d %H:%M:%S")
+        aaa1=datetime.strptime(aaa,"%Y-%m-%d %H:%M:%S")  # 문자열 형식으로 변환
+
+        try:
+            if conn:
+                with conn.cursor() as cursor:
+                    # 쿼리에서 타이핑 오류 수정: usder_id -> user_id
+                    sql = """
+                    INSERT INTO user
+                    (retri_id,balance,datetime,status ) 
+                    VALUES (%s, %s, %s, %s )
+                    """
+                    # cursor.execute를 통해 인자 전달
+                    cursor.execute(sql, (user_no, 10000, aaa1,0))
+
+                    conn.commit()  # 트랜잭션 커밋
+                    
+                    
+                    self.return_dict_data['results']=[]
+                    self.return_dict_data['reCode']=0
+                    self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+
+        except Exception as e:
+            print("Database error:", e)
+
+        finally:
+            if conn:
+                conn.close()  # 항상 연결 종료
+    
+    def get_check_user(self,user_no):
+        
+        
+        # self.return_dict_data=dict(page=0,size=0,totalPages=0,totalCount=0,results=[], reCode=1, message='Server Error')
+        conn = self._get_connection()
+        check = MakeErrorType()
+        new_list=[]
+       
+        try:
+            if conn:
+                with conn.cursor() as cursor:
+                    
+                    sql = f"SELECT * FROM user where retri_id='{user_no}' and status=0;"
+                
+                    cursor.execute(sql)
+                    result=cursor.fetchall()
+                    result=pd.DataFrame(result)
+                    conn.close()
+                    # print(result)
+                    
+                    if len(result)>0:
+                        
+                        
+                        return result
+                    
+                    else:
+                        return []
+
+        except Exception as e:
+            print(e)
+            pass 
+    
+    
+    def get_user_info(self,user_no):
+        
+        
+        # self.return_dict_data=dict(page=0,size=0,totalPages=0,totalCount=0,results=[], reCode=1, message='Server Error')
+        conn = self._get_connection()
+        check = MakeErrorType()
+        new_list=[]
+       
+        try:
+            if conn:
+                with conn.cursor() as cursor:
+                    
+                    sql = f"SELECT * FROM user where retri_id='{user_no}' ;"
+                
+                    cursor.execute(sql)
+                    result=cursor.fetchall()
+                    result=pd.DataFrame(result)
+                    conn.close()
+                    # print(result)
+                    new_dict={}
+                    if len(result)>0:
+                        
+                        new_dict['retri_id']=user_no
+                        new_dict['status']=True
+                        
+                        
+                    
+                    else:
+                        new_dict['retri_id']=user_no
+                        new_dict['status']=False
+                        
+                
+                new_list.append(new_dict)
+                self.return_dict_data['results']=new_list
+                self.return_dict_data['reCode']=0
+                self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+            
+        except Exception as e:
+            print(e)
+            pass 
+        
+        return new_dict
+    def get_resetuser_chck(self,user_no):
+        
+        
+        # self.return_dict_data=dict(page=0,size=0,totalPages=0,totalCount=0,results=[], reCode=1, message='Server Error')
+        conn = self._get_connection()
+        check = MakeErrorType()
+        new_list=[]
+       
+        try:
+            if conn:
+                with conn.cursor() as cursor:
+                    
+                    sql = f"SELECT * FROM user where retri_id={user_no} and status=0 order by datetime desc limit 1"
+        
+                
+                    cursor.execute(sql)
+                    result=cursor.fetchall()
+                    result=pd.DataFrame(result)
+                    
+                    if len(result)>0:
+                        
+                        return result
+        except Exception as e:
+            print(e)
+            pass 
+    
+    
+    def get_resetuser_update(self,user_no):
+        
+        
+        # self.return_dict_data=dict(page=0,size=0,totalPages=0,totalCount=0,results=[], reCode=1, message='Server Error')
+        conn = self._get_connection()
+        check = MakeErrorType()
+        
+        try:
+            if conn:
+                with conn.cursor() as cursor:
+                 
+                    sql = """UPDATE user SET status = %s WHERE id = %s"""
+            
+                    # 파라미터를 튜플로 전달 (symbol을 마지막으로 전달)
+                    values = (1,user_no)
+
+                    # 쿼리 실행
+                    cursor.execute(sql, values)
+
+                    # 커밋 후 커넥션 종료
+                    conn.commit()
+                
+                # 커넥션 종료는 with 블록 밖에서
+                conn.close()   
+        except Exception as e:
+            print(e)
+            pass
+    
+    def get_seed_update(self,user_no):
+        
+        
+        # self.return_dict_data=dict(page=0,size=0,totalPages=0,totalCount=0,results=[], reCode=1, message='Server Error')
+        conn = self._get_connection()
+        check = MakeErrorType()
+        
+        try:
+            if conn:
+                with conn.cursor() as cursor:
+                 
+                    sql = """UPDATE user SET balance = %s WHERE retri_id = %s and status =0"""
+            
+                    # 파라미터를 튜플로 전달 (symbol을 마지막으로 전달)
+                    values = (10000,user_no)
+
+                    # 쿼리 실행
+                    cursor.execute(sql, values)
+
+                    # 커밋 후 커넥션 종료
+                    conn.commit()
+                
+                # 커넥션 종료는 with 블록 밖에서
+                conn.close()   
+        except Exception as e:
+            print(e)
+            pass
+    def get_resetseed(self,user_no):
+        
+        
+        # self.return_dict_data=dict(page=0,size=0,totalPages=0,totalCount=0,results=[], reCode=1, message='Server Error')
+        conn = self._get_connection()
+        check = MakeErrorType()
+        
+        try:
+            if conn:
+                
+                
+                user=self.get_user_info(user_no)
+                
+                if user['status']==True:
+                
+                    print('asdasdsa')
+                    self.get_seed_update(user_no)
+                
+                  
+                    self.return_dict_data['results']=[]
+                    self.return_dict_data['reCode']=0
+                    self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                    self.status_code=200
+                    
+                else:
+                    self.return_dict_data['results']=[]
+                    self.return_dict_data['reCode']=105
+                    self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                    self.status_code=200
+                    
+                    
+        except Exception as e:
+            print(e)
+            pass
+    
+      
+    
+    def reset_user(self, user_no):
+        conn = self._get_connection()
+        check = MakeErrorType()
+        # 현재 시간을 datetime 객체로 가져오기
+        aaa=datetime.strftime(self.now,"%Y-%m-%d %H:%M:%S")
+        aaa1=datetime.strptime(aaa,"%Y-%m-%d %H:%M:%S")  # 문자열 형식으로 변환
+
+        try:
+            if conn:
+                user=self.get_resetuser_chck(user_no)
+                id=user['id'].iloc[0]
+                self.get_resetuser_update(id)
+                with conn.cursor() as cursor:
+                    # 쿼리에서 타이핑 오류 수정: usder_id -> user_id
+                    sql = """
+                    INSERT INTO user
+                    (retri_id,balance,datetime,status ) 
+                    VALUES (%s, %s, %s, %s )
+                    """
+                    # cursor.execute를 통해 인자 전달
+                    cursor.execute(sql, (user_no, 10000, aaa1,0))
+
+                    conn.commit()  # 트랜잭션 커밋
+                    
+                    
+                    
+                    
+                    self.return_dict_data['results']=[]
+                    self.return_dict_data['reCode']=0
+                    self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+
+        except Exception as e:
+            print("Database error:", e)
+
+        finally:
+            if conn:
+                conn.close()  # 항상 연결 종료
