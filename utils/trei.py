@@ -1,6 +1,9 @@
 import os
 import sys
+import traceback
+
 import pymysql.cursors
+from pymysql.cursors import DictCursor
 import json
 from pymysql.connections import Connection
 from starlette.config import Config
@@ -587,13 +590,13 @@ class MySQLAdapter:
     def buy_limit_order(self,user_no: int, symbol: str, margin_type: int, leverage: int,price : float, usdt=0, amount=0,tp=0,sl=0 ) :
         user = self.get_user(user_no)
         check = MakeErrorType()
-        rd = self._get_redis()
-        
-        new_price = rd.get(f'price:{symbol}USDT')
-                
-        if new_price:  # price 값이 None이 아닌 경우에만 진행
-            new_price1 = float(new_price.decode())  # 바이트 문자열을 디코딩하여 float로 변환'
-            
+        # rd = self._get_redis()
+        #
+        # new_price = rd.get(f'price:{symbol}USDT')
+        #
+        # if new_price:  # price 값이 None이 아닌 경우에만 진행
+        #     new_price1 = float(new_price.decode())  # 바이트 문자열을 디코딩하여 float로 변환'
+        #
         margin_type1=margin_type          
         usdt1=usdt
         # margin_type을 'isolated' 또는 'cross'로 설정
@@ -655,13 +658,13 @@ class MySQLAdapter:
                     if new_balance >= 0:
                         print('new_balance:',new_balance)
 
-                        if new_price1<price:
-                            
-                            self.buy_market_order(user_no , symbol, margin_type1, leverage, usdt1, amount,tp,sl)
-                            
-                        else:
-                            
-                            self.inser_oder_history(user_no, symbol, 'limit', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 0,price,tp,sl)
+                        # if new_price1<price:
+                        #
+                        #     self.buy_market_order(user_no , symbol, margin_type1, leverage, usdt1, amount,tp,sl)
+                        #
+                        # else:
+                        #
+                        self.inser_oder_history(user_no, symbol, 'limit', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 0,price,tp,sl)
 
                         self.return_dict_data['results']=[]
                         self.return_dict_data['reCode']=0
@@ -684,13 +687,37 @@ class MySQLAdapter:
     def sell_limit_order(self, user_no: int, symbol: str, margin_type: int, leverage: int,price : float, usdt=0, amount=0,tp=0,sl=0)  :
         user = self.get_user(user_no)
         check = MakeErrorType()
-        rd = self._get_redis()
+        # rd = self._get_redis()
         # margin_type을 'isolated' 또는 'cross'로 설정
         
-        new_price = rd.get(f'price:{symbol}USDT')
-                
-        if new_price:  # price 값이 None이 아닌 경우에만 진행
-            new_price1 = float(new_price.decode())  # 바이트 문자열을 디코딩하여 float로 변환'
+        # new_price = rd.get(f'price:{symbol}USDT')
+        # conn = self._get_connection()
+        # try:
+        #     if conn:
+        #         with conn.cursor() as cursor:
+        #             sql = """
+        #                 SELECT price FROM mocktrade.prices
+        #                 WHERE symbol = %s
+        #             """
+        #             cursor.execute(sql, (symbol,))
+        #
+        #             row = cursor.fetchone()
+        #             if row is None:
+        #                 return {"error": f"Price for {symbol} not found in DB"}
+        #             new_price = float(row[0])
+        #             print("new_price: ", new_price)
+        #     else:
+        #         return {"error": "could not connect to the local database"}
+        # except Exception as e:
+        #     traceback.print_exc()
+        #     print(str(e))
+        #     return { "error": f"Could not find the price of symbol from the local database, {str(e)}"}
+
+
+
+        # if new_price:  # price 값이 None이 아닌 경우에만 진행
+        #     new_price1 = float(new_price.decode())  # 바이트 문자열을 디코딩하여 float로 변환'
+
         margin_type1=margin_type          
         usdt1=usdt
         margin_type = 'isolated' if margin_type == 0 else 'cross'
@@ -753,11 +780,11 @@ class MySQLAdapter:
                     if new_balance >= 0:
                         print('new_balance:',new_balance)
                         
-                        if new_price1>price:
-                            
-                            self.sell_market_order(user_no , symbol, margin_type1, leverage, usdt1, amount,tp,sl)
-                        else:
-                            self.inser_oder_history(user_no, symbol, 'limit', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 0,price,tp,sl)
+                        # if new_price1>price:
+                        #
+                        #     self.sell_market_order(user_no , symbol, margin_type1, leverage, usdt1, amount,tp,sl)
+                        # else:
+                        self.inser_oder_history(user_no, symbol, 'limit', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 0,price,tp,sl)
 
                         self.return_dict_data['results']=[]
                         self.return_dict_data['reCode']=0

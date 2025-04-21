@@ -8,13 +8,14 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Optional
 from utils.settings import MySQLAdapter
 import traceback
-
+from services.trading import settle_limit_orders, settle_tpsl_orders
 router = APIRouter()
 
+MAINT_RATE = 0.005         # first notional tier: 0.5 %
 
 def calculate_binance_liq_price(entry_price, leverage, side):
     if side == "buy":
-        return entry_price * ( 1 - (1 / leverage))
+        return entry_price * (1 - (1 / leverage))
     else:
         return entry_price * (1 + (1 / leverage))
 
@@ -36,7 +37,7 @@ def aggregate_binance_style_position(settled_orders):
     net_amount = long_amount - short_amount
 
     if net_amount == 0:
-        return None # net zero position
+        return None  # net zero position
 
     # Determine side and net amount
     side = "buy" if net_amount > 0 else "sell"
@@ -47,7 +48,8 @@ def aggregate_binance_style_position(settled_orders):
 
     weighted_entry_price = total_size / sum(o["amount"] for o in settled_orders)
     effective_leverage = total_size / total_margin
-    print(f"total size: {total_size}, total_margin: {total_margin}, weighted_entry_price: {weighted_entry_price}, effective leverage: {effective_leverage}")
+    print(
+        f"total size: {total_size}, total_margin: {total_margin}, weighted_entry_price: {weighted_entry_price}, effective leverage: {effective_leverage}")
 
     liq_price = calculate_binance_liq_price(
         entry_price=weighted_entry_price,
@@ -69,60 +71,23 @@ def aggregate_binance_style_position(settled_orders):
     }
 
 
-# @router.get('/openLimitOrder', summary='settle limit orders', tags=['EXECUTE API'])
-# async def api_executeOpenLimit():
-#     mysql = MySQLAdapter()
-#     try:
-#         price_rows = mysql.get_price()
-#         price_dict = { row['symbol']: row for row in price_rows }
-#         print(price_dict)
-#
-#         open_orders = mysql.get_limit_orders_by_status(0)
-#         print(f"open orders: {open_orders}")
-#
-#         #Group orders that get triggered
-#         triggered_orders = []
-#
-#         for order in open_orders:
-#             symbol = order["symbol"]
-#             order_price = order["order_price"]
-#             current_price = price_dict.get(symbol, {}).get("price")
-#             side = order["side"]
-#
-#             print(f"symbol: {symbol}, order_price: {order_price}, current_price: {current_price}, side: {side}")
-#
-#             if current_price is None:
-#                 continue
-#
-#             if (side == 'buy' and order_price >= current_price) or (side == 'sell' and order_price <= current_price):
-#                  # 1. Update status to 1 (settled)
-#                 mysql.update_order_status(order["id"], 1, fill_price=current_price)
-#                 triggered_orders.append((order["user_id"], symbol))
-#
-#         unique_updates = list(set(triggered_orders))
-#         if not unique_updates:
-#             return { "message": "No limit orders were triggered" }
-#         else:
-#             print(f"unique_updates: {unique_updates}")
-#             print(f"triggered orders: {triggered_orders}")
-#
-#         for user_id, symbol in unique_updates:
-#             # 2. fetch all active orders for this user/symbol
-#             settled_orders = mysql.get_settled_orders(user_id, symbol)
-#             # 3. recalculate position
-#             position = aggregate_binance_style_position(settled_orders)
-#
-#             if position:
-#                 # 4. Insert into position_history
-#                 mysql.insert_position_history(position, user_id)
-#         return {
-#             "message": "Settled and recalculated positions",
-#             "updated_positions": unique_updates
-#         }
-#
-#     except Exception as e:
-#         print(f"Error settling limit orders: {str(e)}")
-#         return {"error": str(e)}
+def calc_released_margin(current_margin, new_margin):
+    """Margin that will be credited back to the account."""
+    return max(current_margin - new_margin, 0.0)
+
+MAINT_RATE = 0.005   # 0.5 % first tier
+
+def calc_iso_liq_price(entry_price: float,
+                       leverage: float,
+                       side: str) -> float | None:
+
+    if side == 'buy':     # LONG
+        return entry_price * (1 - 1/leverage)
+    else:                 # SHORT
+        return entry_price * (1 + 1/leverage)
+
+
+
 
 def calculate_position(current_position, order):
     """
@@ -132,7 +97,7 @@ def calculate_position(current_position, order):
 
     user_id = order['user_id']
     symbol = order['symbol']
-    side = order['side'] # buy or sell
+    side = order['side']  # buy or sell
     amount = float(order['amount'])
     price = float(order['price'])
     leverage = float(order['leverage'])
@@ -143,6 +108,13 @@ def calculate_position(current_position, order):
 
     # case 1. No current position -> create new
     if not current_position:
+
+        liq_price = calc_iso_liq_price(
+            price,
+            leverage,
+            side
+        )
+
         return {
             "user_id": user_id,
             "symbol": symbol,
@@ -152,8 +124,10 @@ def calculate_position(current_position, order):
             "margin": order_margin,
             "leverage": leverage,
             "side": side,
+            "pnl": 0,
             "margin_type": margin_type,
-            "status": 1  # open
+            "status": 1,  # open
+            "liq_price": liq_price
         }
 
     # Existing position details
@@ -162,7 +136,7 @@ def calculate_position(current_position, order):
     current_entry_price = float(current_position['entry_price'])
     current_margin = float(current_position['margin'])
     current_size = float(current_position['size'])
-    current_pnl = float(current_position['pnl'])
+    current_pnl = float(current_position.get('pnl') or 0)
 
     # case 2: Same-side -> merge positions
     if current_side == side:
@@ -173,27 +147,46 @@ def calculate_position(current_position, order):
         total_margin = current_margin + order_margin
         effective_leverage = total_size / total_margin if total_margin else leverage
 
+        # released_margin = calc_released_margin(current_margin, total_margin)
+        liq_price = calc_iso_liq_price(
+            avg_entry_price,
+            round(effective_leverage, 4),
+            side
+        )
+
         return {
             "user_id": user_id,
             "symbol": symbol,
             "amount": total_amount,
             "entry_price": avg_entry_price,
             "size": total_size,
+            "pnl": current_pnl,
             "margin": total_margin,
             "leverage": round(effective_leverage, 4),
             "side": side,
             "margin_type": margin_type,
-            "status": 1
+            "status": 1,
+            "liq_price": liq_price
         }
 
     # 🔁 Case 3: Opposite-side → partial close, full close, or flip
     if amount < current_amount:
         # Partial close — reduce position
         new_amount = current_amount - amount
-        close_pnl = (price - current_entry_price) * amount if current_side == 'buy' else (current_entry_price - price) * amount
+        close_pnl = (price - current_entry_price) * amount if current_side == 'buy' else (
+                                                                                                     current_entry_price - price) * amount
         new_pnl = current_pnl + close_pnl
         new_margin = current_margin * (new_amount / current_amount)
         new_size = new_amount * current_entry_price
+
+        effective_leverage = current_size / current_margin if current_margin else leverage
+
+        # released_margin = calc_released_margin(current_margin, new_margin)
+        liq_price = calc_iso_liq_price(
+            current_entry_price,
+            round(effective_leverage, 4),
+            current_side
+        )
 
         return {
             "user_id": user_id,
@@ -207,13 +200,15 @@ def calculate_position(current_position, order):
             "margin_type": margin_type,
             "pnl": new_pnl,
             "close_pnl": close_pnl,
-            "status": 1
+            "status": 1,
+            "liq_price": liq_price,
         }
 
     elif amount == current_amount:
         # Full close — no new position
         close_pnl = (price - current_entry_price) * amount if current_side == 'buy' else (current_entry_price - price) * amount
         new_pnl = current_pnl + close_pnl
+
         return {
             "user_id": user_id,
             "symbol": symbol,
@@ -225,17 +220,22 @@ def calculate_position(current_position, order):
             "side": current_side,
             "margin_type": margin_type,
             "pnl": new_pnl,
-            "close_pnl" : close_pnl,
-            "status": 3  # fully closed
+            "close_pnl": close_pnl,
+            "status": 3,  # fully closed
+            "liq_price": None
         }
 
     else:
         # Flip — close current, open new opposite
         flip_amount = amount - current_amount
-        close_pnl = (price - current_entry_price) * current_amount if current_side == 'buy' else (current_entry_price - price) * current_amount
+        close_pnl = (price - current_entry_price) * current_amount if current_side == 'buy' else (
+                                                                                                             current_entry_price - price) * current_amount
         new_pnl = close_pnl + current_pnl
         new_value = price * flip_amount
         new_margin = new_value / leverage
+
+        liq_price = calc_iso_liq_price(
+            price, leverage, side)
 
         return {
             "user_id": user_id,
@@ -249,7 +249,9 @@ def calculate_position(current_position, order):
             "margin_type": margin_type,
             "pnl": new_pnl,
             "close_pnl": close_pnl,
-            "status": 1
+            "status": 1,
+            "opposite": True,
+            "liq_price": liq_price
         }
 
 
@@ -258,47 +260,63 @@ async def api_executeOpenLimit():
     mysql = MySQLAdapter()
     try:
         price_rows = mysql.get_price()
-        price_dict = { row['symbol']: row for row in price_rows }
+        price_dict = {row['symbol']: row for row in price_rows}
         print(price_dict)
 
         open_orders = mysql.get_limit_orders_by_status(0)
         if not open_orders:
             print("No open orders found")
-            return {"message" : "no open orders found"}
+            return {"message": "no open orders found"}
         else:
             print(f"open orders: {open_orders}")
 
         for order in open_orders:
-            print("Processing order: ", order)
+            print("[Processing order]: ", order)
             order_id = order["id"]
             user_id = order["user_id"]
             symbol = order["symbol"]
-            order_price = order["order_price"]
+            order_price = order["price"]
             current_price = price_dict.get(symbol, {}).get("price")
             side = order["side"]
-
-            print(f"symbol: {symbol}, order_id: {order_id}, user_id: {user_id}, order_price: {order_price}, current_price: {current_price}, side: {side}")
 
             if current_price is None:
                 continue
 
             if (side == 'buy' and order_price >= current_price) or (side == 'sell' and order_price <= current_price):
-                # 1. Update price to the current price (settled)
-                mysql.update_status(order_id, 1)
+
+                # 0. retrieve the user's wallet balance before executing further logic
+                wallet_balance = mysql.get_user_balance(user_id)
 
                 # 1. Retrieve the current position status
                 current_position = mysql.get_current_position(user_id, symbol)
-                print(f"current_position: {current_position}")
+                print(f"[current_position]: {current_position}")
                 # 2. Calculate the new position with a method
                 new_position = calculate_position(current_position, order)
+                # if new_position.get("opposite"):
+                #     projected_balance = wallet_balance + new_position["close_pnl"]
+                #     if new_position["margin"] > projected_balance:
+                #         print("Insufficient margin after flip")
+                #         continue
+
                 print(f"new position: {new_position}")
                 if not current_position:
                     mysql.insert_position(new_position)
                 else:
                     mysql.insert_position(new_position, current_position['id'])
-                close_pnl = new_position['close_pnl']
-                if not close_pnl:
-                    mysql.apply_pnl(user_id, close_pnl)
+                close_pnl = new_position.get('close_pnl')
+                print('close_pnl: ', close_pnl)
+                if close_pnl:
+                    new_balance = wallet_balance + close_pnl
+                    if new_balance < 0:
+                        print(f"Wallet balance of the user {user_id} going negative")
+                        continue
+                    update_response = mysql.update_pnl(user_id, new_balance)
+                    if "error" in update_response:
+                        print("update_pnl failed:", update_response["error"])
+                        continue
+
+                # 3. Update order status to 1 (settled)
+                mysql.update_status(order_id, 1)
 
         return {
             "message": "recalculated positions with triggered limit orders",
@@ -310,7 +328,17 @@ async def api_executeOpenLimit():
         return {"error": str(e)}
 
 
-@router.post('/close', summary = 'close existing position', tags = ["EXECUTE API"])
+@router.get('/settleLimitOrders', summary='settle limit orders', tags=['EXECUTE API'])
+async def api_settleLimitOrders():
+    count = settle_limit_orders()
+    return {"settled orders": count}
+
+@router.get('/settleTpslOrders', summary='settle tpsl orders', tags=['EXECUTE API'])
+async def api_settleTpslORders():
+    count = settle_tpsl_orders()
+    return {"settled orders": count}
+
+@router.post('/close', summary='close existing position', tags=["EXECUTE API"])
 def api_closePosition(user_id: int, symbol: str):
     mysql = MySQLAdapter()
     try:
@@ -318,4 +346,4 @@ def api_closePosition(user_id: int, symbol: str):
         return query_result
     except Exception as e:
         print(str(e))
-        return { "error" : f"Failed to close the existing position {str(e)}" }
+        return {"error": f"Failed to close the existing position {str(e)}"}

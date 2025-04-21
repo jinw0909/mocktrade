@@ -134,7 +134,7 @@ class MySQLAdapter:
         conn = self._get_connection()
         try:
             if conn:
-                with conn.cursor(DictCursor) as cursor:
+                with conn.cursor() as cursor:
                     sql = f"SELECT * FROM user WHERE id = {user_no}"
                     cursor.execute(sql)
                     row = cursor.fetchone()
@@ -201,7 +201,7 @@ class MySQLAdapter:
         conn = self._get_connection()
         try:
             if conn:
-                with conn.cursor(DictCursor) as cursor:
+                with conn.cursor() as cursor:
                     sql = f"SELECT * FROM mocktrade.prices"
                     cursor.execute(sql)
                     rows = cursor.fetchall()
@@ -219,7 +219,7 @@ class MySQLAdapter:
         conn = self._get_connection()
         try:
             if conn:
-                with conn.cursor(DictCursor) as cursor:
+                with conn.cursor() as cursor:
                     sql = """
                         SELECT * FROM mocktrade.order_history
                         WHERE `type` = 'limit'
@@ -252,7 +252,6 @@ class MySQLAdapter:
                     cursor.execute(sql, (status, order_id))
                 conn.commit()
                 conn.close()
-                return { "message" : f"Order {order_id} marked as filled at {fill_price}" }
             else:
                 return { "error": "Could not connect to DB" }
         except Exception as e:
@@ -263,7 +262,7 @@ class MySQLAdapter:
         conn = self._get_connection()
         try:
             if conn:
-                with conn.cursor(DictCursor) as cursor:
+                with conn.cursor() as cursor:
                     sql = """
                         SELECT * FROM mocktrade.order_history
                         WHERE user_id = %s 
@@ -337,102 +336,101 @@ class MySQLAdapter:
             return { "error" : str(e)}
 
     def close_position(self, user_id, symbol):
-        conn = self._get_connection()
         try:
-            if conn:
-                with conn.cursor() as cursor:
-                    # 1. Get the active position
-                    find_sql = """
-                        SELECT * FROM mocktrade.position_history
-                        WHERE user_id = %s
-                        AND symbol = %s
-                        AND status = 1
-                        ORDER BY `datetime` DESC
-                        LIMIT 1
-                    """
-                    cursor.execute(find_sql, (user_id, symbol))
-                    find_result = cursor.fetchone()
+            with self._get_connection() as conn, conn.cursor() as cursor:
+                # 1. Get the active position
+                find_sql = """
+                    SELECT * FROM mocktrade.position_history
+                    WHERE user_id = %s
+                    AND symbol = %s
+                    AND status = 1
+                    ORDER BY `datetime` DESC
+                    LIMIT 1
+                """
+                cursor.execute(find_sql, (user_id, symbol))
+                find_result = cursor.fetchone()
 
-                    if not find_result:
-                        return { "error" : "No active position to close" }
+                if not find_result:
+                    return { "error" : "No active position to close" }
 
-                    position_id = find_result["id"]
-                    entry_price = float(find_result["entry_price"])
-                    amount = float(find_result["amount"])
-                    side = find_result["side"]
+                position_id = find_result["id"]
+                entry_price = float(find_result["entry_price"])
+                amount = float(find_result["amount"])
+                side = find_result["side"]
 
-                    # 2. Get current price
-                    price_sql = """
-                        SELECT price FROM mocktrade.prices
-                        WHERE symbol = %s
-                        ORDER BY updatedAt DESC
-                        LIMIT 1
-                    """
-                    cursor.execute(price_sql, (symbol,))
-                    price_result = cursor.fetchone()
-                    if not price_result:
-                        return { "error": "Price not available" }
-                    current_price = float(price_result["price"])
+                # 2. Get current price
+                price_sql = """
+                    SELECT price FROM mocktrade.prices
+                    WHERE symbol = %s
+                    ORDER BY updatedAt DESC
+                    LIMIT 1
+                """
+                cursor.execute(price_sql, (symbol,))
+                price_result = cursor.fetchone()
+                if not price_result:
+                    return { "error": "Price not available" }
+                current_price = float(price_result["price"])
 
-                    # 3. calculate pnl
-                    if side == 'buy':
-                        derived_pnl = (current_price - entry_price) * amount
-                    elif side == 'sell':
-                        derived_pnl = (entry_price - current_price) * amount
+                # 3. calculate pnl
+                if side == 'buy':
+                    derived_pnl = (current_price - entry_price) * amount
+                elif side == 'sell':
+                    derived_pnl = (entry_price - current_price) * amount
 
-                    # 4. Mark position as closed
-                    update_sql = """
-                        UPDATE mocktrade.position_history 
-                        SET pnl = %s, status = 3
-                        WHERE id = %s
-                    """
-                    cursor.execute(update_sql, (derived_pnl, position_id))
+                # 4. Mark position as closed
+                update_sql = """
+                    UPDATE mocktrade.position_history 
+                    SET pnl = COALESCE(pnl, 0) + %s, status = 3
+                    WHERE id = %s
+                """
+                cursor.execute(update_sql, (derived_pnl, position_id))
 
-                    # 5. Update user's balance
-                    balance_sql = """
-                        SELECT balance FROM mocktrade.user
-                        WHERE id = %s
-                    """
-                    cursor.execute(balance_sql, (user_id,))
-                    balance_result = cursor.fetchone()
-                    current_balance = float(balance_result["balance"])
-                    new_balance = current_balance + derived_pnl
+                # 5. Update user's balance
+                balance_sql = """
+                    SELECT balance FROM mocktrade.user
+                    WHERE id = %s
+                """
+                cursor.execute(balance_sql, (user_id,))
+                balance_result = cursor.fetchone()
+                current_balance = float(balance_result["balance"])
+                new_balance = current_balance + derived_pnl
 
-                    update_balance_sql = """
-                        UPDATE mocktrade.user 
-                        SET balance = %s
-                        WHERE id = %s
-                    """
-                    cursor.execute(update_balance_sql, (new_balance, user_id))
+                update_balance_sql = """
+                    UPDATE mocktrade.user 
+                    SET balance = %s
+                    WHERE id = %s
+                """
+                cursor.execute(update_balance_sql, (new_balance, user_id))
 
                 conn.commit()
-                conn.close()
 
-                return {
-                    "message": "Position closed with PnL calculation",
-                    "derived_pnl": derived_pnl,
-                    "updated_balance": new_balance,
-                    "user_id": user_id,
-                    "symbol": symbol,
-                    "side": side,
-                    "current_price": current_price,
-                    "entry_price": entry_price
-                }
+            return {
+                "message": "Position closed with PnL calculation",
+                "derived_pnl": derived_pnl,
+                "updated_balance": new_balance,
+                "user_id": user_id,
+                "symbol": symbol,
+                "side": side,
+                "current_price": current_price,
+                "entry_price": entry_price
+            }
 
         except Exception as e:
             print(str(e))
+            traceback.print_exc()
             return { "error" : f"Failed to close position: {str(e)}"}
 
     def get_current_position(self, user_id, symbol):
         conn = self._get_connection()
         try:
             if conn:
-                with conn.cursor(DictCursor) as cursor:
+                with conn.cursor() as cursor:
                     sql = """
                         SELECT * FROM mocktrade.position_history
                         WHERE user_id = %s
                         AND symbol = %s
                         ORDER BY `datetime` DESC
+                        LIMIT 1
                     """
                     cursor.execute(sql, (user_id, symbol,))
                     result = cursor.fetchone()
@@ -446,83 +444,86 @@ class MySQLAdapter:
 
     def insert_position(self, new_position, old_id=None):
         print("running insert_position()")
-        conn = self._get_connection()
         try:
-            if conn:
-                with conn.cursor() as cursor:
+            with self._get_connection() as conn, conn.cursor() as cursor:
 
-                    insert_sql = """
-                        INSERT INTO mocktrade.position_history
-                        (user_id, symbol, size, amount, entry_price, liq_price, margin_ratio, margin,
-                        pnl, margin_type, side, leverage, status, tp, sl, datetime)
-                        VALUES 
-                        (%s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s)
+                insert_sql = """
+                    INSERT INTO mocktrade.position_history
+                    (user_id, symbol, size, amount, entry_price, liq_price, margin_ratio, margin,
+                    pnl, margin_type, side, leverage, status, tp, sl, datetime)
+                    VALUES 
+                    (%s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+                cursor.execute(insert_sql, (
+                    new_position.get('user_id'),
+                    new_position.get('symbol'),
+                    new_position.get('size'),
+                    new_position.get('amount'),
+                    new_position.get('entry_price'),
+                    new_position.get('liq_price'),
+                    new_position.get('margin_ratio'),
+                    new_position.get('margin'),
+                    new_position.get('pnl'),
+                    new_position.get('margin_type'),
+                    new_position.get('side'),
+                    new_position.get('leverage'),
+                    new_position.get('status'),
+                    new_position.get('tp'),
+                    new_position.get('sl'),
+                    datetime.now(timezone('Asia/Seoul'))
+                ))
+
+                if old_id:
+                    update_sql = """
+                        UPDATE mocktrade.position_history
+                        SET status = 2
+                        WHERE id = %s
                     """
-                    cursor.execute(insert_sql, (
-                        new_position.get('user_id'),
-                        new_position.get('symbol'),
-                        new_position.get('size'),
-                        new_position.get('amount'),
-                        new_position.get('entry_price'),
-                        new_position.get('liq_price'),
-                        new_position.get('margin_ratio'),
-                        new_position.get('margin'),
-                        new_position.get('pnl'),
-                        new_position.get('margin_type'),
-                        new_position.get('side'),
-                        new_position.get('leverage'),
-                        new_position.get('status'),
-                        new_position.get('tp'),
-                        new_position.get('sl'),
-                        datetime.now(timezone('Asia/Seoul'))
-                    ))
-
-                    if old_id:
-                        update_sql = """
-                            UPDATE mocktrade.position_history
-                            SET status = 2
-                            WHERE id = %s
-                        """
-                        cursor.execute(update_sql, (old_id,))
-                conn.commit()
-                conn.close()
-            else:
-                return { "error" : "Failed to connect to the database"}
+                    cursor.execute(update_sql, (old_id,))
+            conn.commit()
         except Exception as e:
             print(str(e))
             return {"error" : str(e)}
 
-    def apply_pnl(self, user_id, close_pnl):
-        conn = self._get_connection()
-        try:
-            if conn:
-                with conn.cursor() as cursor:
-                    # find_sql = """
-                    #     SELECT balance FROM mocktrade.balance
-                    #     WHERE user_id = %s
-                    # """
-                    # cursor.execute(find_sql, (user_id,))
-                    # current_balance = cursor.fetchone()
+    def update_pnl(self, user_id, new_balance):
 
-                    update_sql = """
-                        UPDATE mocktrade.balance
-                        SET balance = balance + %s
-                        WHERE user_id = %s
-                    """
-                    cursor.execute(update_sql, (user_id,))
-                    new_balance_row = cursor.fetchone()
-                    new_balance = new_balance_row[0] if new_balance_row else None
+        update_sql = """
+            UPDATE mocktrade.user
+            SET balance = %s
+            WHERE id = %s
+        """
+
+        try:
+            with self._get_connection() as conn, conn.cursor() as cursor:
+                cursor.execute(update_sql, (new_balance, user_id,))
                 conn.commit()
-                # conn.close()
-                return {"balance" : new_balance }
-            else:
-                return {"error" : "Failed to connect to the database"}
+                return {"new_balance": new_balance}
+
         except Exception as e:
-            conn.rollback()
             print(str(e))
             traceback.print_exc()
-            return { "error" : f"Failed to apply close pnl to user balance: {str(e)}"}
+            return {"error": {str(e)}}
+
+    def get_user_balance(self, user_id):
+        sql = """
+            SELECT balance FROM `mocktrade`.`user`
+            WHERE id = %s
+            ORDER BY `datetime` DESC
+            LIMIT 1
+        """
+
+        try:
+            with self._get_connection() as conn, conn.cursor() as cursor:
+                cursor.execute(sql, (user_id,))
+                row = cursor.fetchone()
+                if row is None:
+                    raise ValueError(f"User {user_id} not found")
+                return row["balance"]
+        except Exception as e:
+            print(f"Failed to retrieve balance for {user_id}: {e}")
+            traceback.print_exc()
+            raise
 
 
 

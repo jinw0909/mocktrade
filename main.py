@@ -11,7 +11,7 @@ from fastapi import Request
 from urllib.parse import parse_qs
 from starlette.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from routers import trei_routers, settings_routers, frontapi_routers, auth_routers
+from routers import trei_routers, settings_routers, frontapi_routers
 
 # FastAPI 애플리케이션 설정
 app = FastAPI()
@@ -43,7 +43,7 @@ app.include_router(trei_routers.router, prefix='/trading')
 app.include_router(frontapi_routers.router, prefix='/user')
 app.include_router(settings_routers.router, prefix='/settings')
 app.include_router(execute_routers.router, prefix='/execute')
-app.include_router(auth_routers.router, prefix='/session')
+# app.include_router(auth_routers.router, prefix='/session')
 # @app.get('/list', tags=['코인 리스트'], summary='코인 항목')
 # async def ticker_list():
 #     try:
