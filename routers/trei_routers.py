@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from utils.trei import MySQLAdapter,MakeErrorType
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Optional
+from models import OrderModel
 router= APIRouter()
 
 
@@ -167,6 +168,39 @@ async def api_select(user_no: str,ordid:int):
     
     """
 
+    
+    """
+    mysql=MySQLAdapter()
+    check = MakeErrorType()
+    try:
+        data=mysql.get_check_user(user_no)
+        # print(data)
+        print('sadsaddasdas',ordid)
+        if len(data)>0  :
+            # print('asdasdasdasdsa')
+            user_id=data['id'].iloc[0] 
+            mysql.cancel_order(user_id,ordid)
+        else:
+            
+            mysql.return_dict_data['reCode']=105
+            mysql.return_dict_data['message'] = check.error(mysql.return_dict_data['reCode'])
+            mysql.status_code=423
+
+
+    except Exception as e:
+        print(e)
+        
+
+    return JSONResponse(mysql.return_dict_data, status_code=mysql.status_code)
+
+
+
+@router.post('/all_cancle_order', summary='ORDER', tags=['ORDER API'])
+async def api_select(user_no: str,ordid:OrderModel):
+
+    
+    """
+
    
     """
     mysql=MySQLAdapter()
@@ -175,9 +209,9 @@ async def api_select(user_no: str,ordid:int):
         data=mysql.get_check_user(user_no)
         # print(data)
         if len(data)>0  :
-            # print('asdasdasdasdsa')
+            # print('asdasdasdasdsa',ordid.value)
             user_id=data['id'].iloc[0] 
-            mysql.cancel_order(user_id,ordid)
+            mysql.all_cancel_order(user_id,ordid.value)
         else:
             
             mysql.return_dict_data['reCode']=105
@@ -210,6 +244,39 @@ async def api_select(user_no: str,position_id:int):
             
             user_id=data['id'].iloc[0] 
             mysql.cancel_position(user_id,position_id)
+        else:
+            
+            mysql.return_dict_data['reCode']=105
+            mysql.return_dict_data['message'] = check.error(mysql.return_dict_data['reCode'])
+            mysql.status_code=423 
+
+
+    except Exception as e:
+        print(e)
+        
+
+    return JSONResponse(mysql.return_dict_data, status_code=mysql.status_code)
+
+
+
+
+@router.post('/all_close_position', summary='ALL_CLOSE POSITION', tags=['ORDER API'])
+async def api_select(user_no: str):
+
+    
+    """
+
+   
+    """
+    mysql=MySQLAdapter()
+    check = MakeErrorType()
+    try:
+        data=mysql.get_check_user(user_no)
+        
+        if len(data)>0  :
+            
+            user_id=data['id'].iloc[0] 
+            mysql.all_cancel_position(user_id)
         else:
             
             mysql.return_dict_data['reCode']=105

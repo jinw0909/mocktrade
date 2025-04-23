@@ -56,8 +56,8 @@ async def api_select(retri_id:str ):
 
 
 
-@router.post('/reset_seed', summary='SEED RESET', tags=['USER API'])
-async def api_select(retri_id: str):
+@router.post('/charge_seed', summary='SEED CHARGE', tags=['USER API'])
+async def api_select(retri_id: str,seed:float):
 
     
     """
@@ -65,10 +65,13 @@ async def api_select(retri_id: str):
     
     """
     mysql=MySQLAdapter()
-    
-    try:    
-        mysql.get_resetseed(retri_id)
+    check = MakeErrorType()
+    try:
+        
+         
+        mysql.get_resetseed(retri_id,seed)
             
+ 
 
 
     except Exception as e:
@@ -194,6 +197,38 @@ async def api_select(user_no: str,symbol:str =''):
 
 
     return JSONResponse(mysql.return_dict_data, status_code=mysql.status_code)
+
+
+
+@router.get('/get_position_history', summary='POSITION HISTORY', tags=['USER API'])
+async def api_select(user_no: str):
+
+    
+    """
+
+    
+    """
+    mysql=MySQLAdapter()
+    check = MakeErrorType()
+    try:
+        data=mysql.get_check_user(user_no)
+        if len(data)>0  :
+          
+            user_id=data['id'].iloc[0] 
+            mysql.get_position_history(user_id)
+            
+        else:
+            
+            mysql.return_dict_data['reCode']=105
+            mysql.return_dict_data['message'] = check.error(mysql.return_dict_data['reCode'])
+            mysql.status_code=423
+
+    except Exception as e:
+        print(e)
+
+
+    return JSONResponse(mysql.return_dict_data, status_code=mysql.status_code)
+
 
 
 

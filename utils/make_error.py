@@ -36,8 +36,8 @@ class MakeErrorType:
                   'no user' if error_code == 105 else (
                   'datetime error' if error_code == 106 else (
                   'size error' if error_code == 107 else(
-                  'set_ price error' if error_code == 30006 else(
-                  'non symbol error' if error_code == 30007 else(
+                  'tp_sl_set_ price error' if error_code == 30006 else(
+                  'set_ price error' if error_code == 30007 else(
                   'magin_error' if error_code == 30008 else(
                   'sl_error' if error_code == 30009 else(
                   'tp_error' if error_code == 30010 else(

@@ -110,6 +110,12 @@ class MySQLAdapter:
                 if len(result)>0:
                     for i in result.iterrows():
                         df_data=i[1]
+                        if df_data['liq_price'] <0 :
+                            liq_price=0
+                        
+                        else:
+                            liq_price=df_data['liq_price']
+                        
                         new_dict={}
                         new_dict['position_id']=df_data['id']
                         new_dict['user_no']=df_data['user_id']
@@ -118,7 +124,7 @@ class MySQLAdapter:
                         # new_dict['deposit']=str(df_data['deposit'])
                         new_dict['amount']=str(df_data['amount'])
                         new_dict['entry_price']=str(df_data['entry_price'])
-                        new_dict['liq_price']=str(df_data['liq_price'])
+                        new_dict['liq_price']=str(liq_price)
                         new_dict['margin']=str(df_data['margin'])
                         new_dict['margin_type']=str(df_data['margin_type'])
                         new_dict['side']=str(df_data['side'])
@@ -290,6 +296,127 @@ class MySQLAdapter:
     
     
     
+    def get_posioder(self,po_id):
+        
+        
+        
+        # self.return_dict_data=dict(page=0,size=0,totalPages=0,totalCount=0,results=[], reCode=1, message='Server Error')
+        conn = self._get_connection()
+        check = MakeErrorType()
+        new_list=[]
+       
+        try:
+            if conn:
+                with conn.cursor() as cursor:
+                    
+                    sql = f"SELECT * FROM order_history WHERE po_id = {po_id} and status=1  ORDER BY insert_time DESC;"
+                    
+                
+                    cursor.execute(sql)
+                    result=cursor.fetchall()
+                    result=pd.DataFrame(result)
+                    
+                    # print('-----------------',result)
+                if len(result)>0:
+                    
+                    data=result
+                    
+                    
+                    if len(result)>=2:
+                        
+                        data=result
+                        
+                    
+                    return data,True
+                
+                else:
+                
+                    return data,False
+              
+                 
+         
+                       
+               
+        except Exception as e:
+            print(e)
+            pass 
+        
+     
+        
+    
+    
+    
+    
+    def get_position_history(self,user_no):
+        
+        
+        
+        # self.return_dict_data=dict(page=0,size=0,totalPages=0,totalCount=0,results=[], reCode=1, message='Server Error')
+        conn = self._get_connection()
+        check = MakeErrorType()
+        new_list=[]
+       
+        try:
+            if conn:
+                with conn.cursor() as cursor:
+                   
+                    # sql = f"SELECT * FROM  order_history ph WHERE user_id ={user_no} order by datetime desc;"
+                    sql = f"SELECT * FROM position_history WHERE user_id = {user_no} and (status =2 or status=3) and pnl !=0 ORDER BY datetime DESC;"
+               
+                
+                    cursor.execute(sql)
+                    result=cursor.fetchall()
+                    result=pd.DataFrame(result)
+                    print(result)
+                #     new_dict={}
+                if len(result)>0:
+                    for i in result.iterrows():
+                        new_dict={}
+                        df_data=i[1]
+                        order,orty=self.get_posioder(df_data['id'])
+                        
+                        
+                        if  orty ==True:
+                     
+                            print('order',order)
+                            new_dict['user_no']=df_data['user_id']
+                            new_dict['symbol']=df_data['symbol']
+                            new_dict['side']=str(df_data['side'])
+                            new_dict['margin_type']=str(df_data['margin_type'])
+                            # new_dict['deposit']=str(df_data['deposit'])
+                            new_dict['close_vol']=str(order['amount'].iloc[0])
+                            new_dict['entry_price']=str(df_data['entry_price'])
+                            new_dict['close_price']=str(order['price'].iloc[0])
+                            new_dict['close_pnl']=str(df_data['pnl'])
+                            new_dict['close_datetime']=str(df_data['datetime'])
+                            # new_dict['amount']=str(df_data['amount'])
+                            # # new_dict['side']=str(df_data['side'])
+                            # new_dict['leverage']=str(df_data['leverage'])
+                            # new_dict['tp']=str(df_data['tp'])
+                            # new_dict['sl']=str(df_data['sl'])
+                            # new_dict['datetime']=str(df_data['insert_time'])
+                            new_list.append(new_dict)
+                    
+                   
+                    
+                 
+                    
+            self.return_dict_data=dict(results=new_list)
+            self.return_dict_data['reCode']=0
+            self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+            self.status_code=200   
+                    
+                       
+               
+        except Exception as e:
+            print(e)
+            pass 
+        
+     
+        return True
+    
+    
+    
     def get_diff_balance(self,user_no):
         
         
@@ -302,8 +429,8 @@ class MySQLAdapter:
             if conn:
                 with conn.cursor() as cursor:
                     
-                    sql = f"SELECT * FROM order_history where user_id={user_no} and status =0"
-        
+                    # sql = f"SELECT * FROM order_history where user_id={user_no} and status =0"
+                    sql = f"SELECT * FROM order_history where user_id={user_no} and status =0 AND `type` !='tp' and `type` !='sl';"
                 
                     cursor.execute(sql)
                     result=cursor.fetchall()
@@ -331,14 +458,23 @@ class MySQLAdapter:
                     
                     
                     bal=balance-order_bal-po_bal
+                    
+                    
+                    if bal <0:
                         
+                        new_bal=balance-po_bal
+                    
+                    else:
+                        new_bal=balance-order_bal-po_bal
+                        
+                            
                         
                         
         except Exception as e:
             print(e)
             pass 
         
-        return bal
+        return new_bal
     
     
     def get_user1(self,user_no):
@@ -587,7 +723,7 @@ class MySQLAdapter:
             print(e)
             pass
     
-    def get_seed_update(self,user_no):
+    def get_seed_update(self,user_no,seed):
         
         
         # self.return_dict_data=dict(page=0,size=0,totalPages=0,totalCount=0,results=[], reCode=1, message='Server Error')
@@ -601,7 +737,7 @@ class MySQLAdapter:
                     sql = """UPDATE user SET balance = %s WHERE retri_id = %s and status =0"""
             
                     # 파라미터를 튜플로 전달 (symbol을 마지막으로 전달)
-                    values = (10000,user_no)
+                    values = (seed,user_no)
 
                     # 쿼리 실행
                     cursor.execute(sql, values)
@@ -614,7 +750,7 @@ class MySQLAdapter:
         except Exception as e:
             print(e)
             pass
-    def get_resetseed(self,user_no):
+    def get_resetseed(self,user_no,seed):
         
         
         # self.return_dict_data=dict(page=0,size=0,totalPages=0,totalCount=0,results=[], reCode=1, message='Server Error')
@@ -626,11 +762,18 @@ class MySQLAdapter:
                 
                 
                 user=self.get_user_info(user_no)
-                
+                print('user')
                 if user['status']==True:
-                
-                    print('asdasdsa')
-                    self.get_seed_update(user_no)
+                    
+                    data=self.get_check_user(user_no)
+                    id=user_id=data['id'].iloc[0]  
+                    
+                    bal=self.get_user1(id)
+                    
+                    print('asdasdsa',bal)
+                    new_bal=float(bal)+float(seed)
+                    
+                    self.get_seed_update(user_no,new_bal)
                 
                   
                     self.return_dict_data['results']=[]
@@ -688,3 +831,63 @@ class MySQLAdapter:
         finally:
             if conn:
                 conn.close()  # 항상 연결 종료
+                
+    
+                
+                
+    # def get_pnl_history(self,user_no):
+        
+        
+        
+    #     # self.return_dict_data=dict(page=0,size=0,totalPages=0,totalCount=0,results=[], reCode=1, message='Server Error')
+    #     conn = self._get_connection()
+    #     check = MakeErrorType()
+    #     new_list=[]
+       
+    #     try:
+    #         if conn:
+    #             with conn.cursor() as cursor:
+                    
+    #                 # sql = f"SELECT * FROM  order_history ph WHERE user_id ={user_no} order by datetime desc;"
+    #                 sql = f"SELECT * FROM position_history WHERE user_id = {user_no} and(status=2 or status=3) and pnl>=0 ORDER BY datetime DESC;"
+                
+    #                 cursor.execute(sql)
+    #                 result=cursor.fetchall()
+    #                 result=pd.DataFrame(result)
+                    
+    #                 new_dict={}
+    #             if len(result)>0:
+    #                 for i in result.iterrows():
+    #                     df_data=i[1]
+                        
+    #                     new_dict={}
+    #                     new_dict['position_id']=df_data['id']
+    #                     new_dict['symbol']=df_data['symbol']    
+    #                     new_dict['margin_type']=str(df_data['margin_type'])
+    #                     new_dict['side']=str(df_data['side'])
+    #                     new_dict['price']=str(df_data['entry_price'])
+    #                     new_dict['margin']=str(df_data['magin']*df_data['leverage'])
+    #                     new_dict['amount']=str(df_data['amount'])
+    #                     # new_dict['side']=str(df_data['side'])
+    #                     new_dict['leverage']=str(df_data['leverage'])
+                      
+    #                     new_dict['datetime']=str(df_data['insert_time'])
+    #                     new_list.append(new_dict)
+                    
+                   
+                    
+                 
+                    
+        #     self.return_dict_data=dict(results=new_list)
+        #     self.return_dict_data['reCode']=0
+        #     self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+        #     self.status_code=200   
+                    
+                       
+               
+        # except Exception as e:
+        #     print(e)
+        #     pass 
+        
+     
+        # return True
