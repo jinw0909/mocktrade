@@ -34,7 +34,6 @@ import redis
 config = Config(".env")
 
 
-
 class MySQLAdapter:
 
     def __init__(self) -> None:
@@ -214,7 +213,6 @@ class MySQLAdapter:
             print(f"Error during retrieving prices from db {str(e)}")
             return {"error": str(e)}
 
-
     def get_limit_orders_by_status(self, status: int):
         conn = self._get_connection()
         try:
@@ -227,16 +225,16 @@ class MySQLAdapter:
                         AND `margin_type` = 'isolated'
                         ORDER BY `insert_time` ASC
                     """
-                    cursor.execute(sql, (status, ))
+                    cursor.execute(sql, (status,))
                     rows = cursor.fetchall()
                 conn.close()
                 return rows
             else:
                 print("Could not get db connection")
-                return { "error" : "Could not get db connection" }
+                return {"error": "Could not get db connection"}
         except Exception as e:
             print(f"Error during retrieving limit orders by type : {str(e)}")
-            return { "error" : str(e)}
+            return {"error": str(e)}
 
     def update_status(self, order_id, status):
         conn = self._get_connection()
@@ -253,10 +251,10 @@ class MySQLAdapter:
                 conn.commit()
                 conn.close()
             else:
-                return { "error": "Could not connect to DB" }
+                return {"error": "Could not connect to DB"}
         except Exception as e:
             print(f"Error updating order status {str(e)}")
-            return { "error": str(e) }
+            return {"error": str(e)}
 
     def get_settled_orders(self, user_id, symbol):
         conn = self._get_connection()
@@ -275,11 +273,11 @@ class MySQLAdapter:
                 result = cursor.fetchall()
                 return result
             else:
-                return {"error" : "Failed to connect to the database"}
+                return {"error": "Failed to connect to the database"}
 
         except Exception as e:
             print(f"Error during retrieving settled orders")
-            return { "error" : str(e) }
+            return {"error": str(e)}
 
     def insert_position_history(self, position, user_id):
         conn = self._get_connection()
@@ -326,18 +324,34 @@ class MySQLAdapter:
 
                 conn.commit()
                 conn.close()
-                return { "message" : "Position history inserted successfully" }
+                return {"message": "Position history inserted successfully"}
 
             else:
-                return { "error": "Failed to connect to the database"}
+                return {"error": "Failed to connect to the database"}
 
         except Exception as e:
             print(str(e))
-            return { "error" : str(e)}
+            return {"error": str(e)}
 
-    def close_position(self, user_id, symbol):
+    def close_position(self, retri_id, symbol):
         try:
             with self._get_connection() as conn, conn.cursor() as cursor:
+
+                # 1. get the actual user_id
+                cursor.execute("""
+                    SELECT `id` FROM `mocktrade`.`user`
+                    WHERE `retri_id` = %s
+                    ORDER BY `id`
+                    LIMIT 1
+                """, (retri_id,))
+
+                user_id = cursor.fetchone()['id']
+
+                if not user_id:
+                    print("could not find a user with the retri_id")
+                    return {"error": "could not find a user with the retri_id"}
+                print("user_id: ", user_id)
+
                 # 1. Get the active position
                 find_sql = """
                     SELECT * FROM mocktrade.position_history
@@ -351,12 +365,13 @@ class MySQLAdapter:
                 find_result = cursor.fetchone()
 
                 if not find_result:
-                    return { "error" : "No active position to close" }
+                    return {"error": "No active position to close"}
 
                 position_id = find_result["id"]
                 entry_price = float(find_result["entry_price"])
                 amount = float(find_result["amount"])
                 side = find_result["side"]
+                margin = float(find_result['margin'])
 
                 # 2. Get current price
                 price_sql = """
@@ -368,22 +383,75 @@ class MySQLAdapter:
                 cursor.execute(price_sql, (symbol,))
                 price_result = cursor.fetchone()
                 if not price_result:
-                    return { "error": "Price not available" }
+                    return {"error": "Price not available"}
                 current_price = float(price_result["price"])
 
                 # 3. calculate pnl
                 if side == 'buy':
-                    derived_pnl = (current_price - entry_price) * amount
+                    raw_pnl = (current_price - entry_price) * amount
                 elif side == 'sell':
-                    derived_pnl = (entry_price - current_price) * amount
+                    raw_pnl = (entry_price - current_price) * amount
 
-                # 4. Mark position as closed
-                update_sql = """
-                    UPDATE mocktrade.position_history 
-                    SET pnl = COALESCE(pnl, 0) + %s, status = 3
-                    WHERE id = %s
+                # 3a. forced-liquidation guard: cap losses at -margin
+                if raw_pnl <= -margin:
+                    derived_pnl = -margin
+                    new_status = 4
+                else:
+                    derived_pnl = raw_pnl
+                    new_status = 3
+
+                # 4. Mark position as closed (insert new position)
+                cursor.execute("""
+                    UPDATE mocktrade.position_history
+                    SET status = 2 
+                    WHERE status = 1
+                    AND user_id = %s
+                    AND symbol = %s
+                """, (user_id, symbol))
+
+                insert_sql = """
+                    INSERT INTO mocktrade.position_history (
+                        user_id, symbol, size, amount, entry_price, liq_price,
+                        margin, pnl, margin_type, side, leverage, status, tp, sl, `datetime`, close_price
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )
                 """
-                cursor.execute(update_sql, (derived_pnl, position_id))
+                cursor.execute(insert_sql, (
+                    user_id,
+                    symbol,
+                    0,
+                    0,
+                    entry_price,
+                    None,
+                    0,
+                    derived_pnl,
+                    'isolated',
+                    side,
+                    0,
+                    new_status,
+                    None,
+                    None,
+                    datetime.now(timezone('Asia/Seoul')),
+                    current_price
+                ))
+
+                # update_sql = """
+                #     UPDATE mocktrade.position_history
+                #     SET pnl = COALESCE(pnl, 0) + %s, status = 3
+                #     WHERE id = %s
+                # """
+
+                update_sql = """
+                    UPDATE mocktrade.order_history 
+                    SET `status` = 4
+                    WHERE `type` IN ('tp', 'sl')
+                    AND `user_id` = %s
+                    AND `symbol` = %s
+                """
+
+                cursor.execute(update_sql, (user_id, symbol))
 
                 # 5. Update user's balance
                 balance_sql = """
@@ -418,7 +486,7 @@ class MySQLAdapter:
         except Exception as e:
             print(str(e))
             traceback.print_exc()
-            return { "error" : f"Failed to close position: {str(e)}"}
+            return {"error": f"Failed to close position: {str(e)}"}
 
     def get_current_position(self, user_id, symbol):
         conn = self._get_connection()
@@ -437,10 +505,10 @@ class MySQLAdapter:
                 conn.close()
                 return result
             else:
-                return { "error" : "Failed to connect tp the database" }
+                return {"error": "Failed to connect tp the database"}
         except Exception as e:
             print(str(e))
-            return { "error" : f"Error during retrieving a previous position: {str(e)}"}
+            return {"error": f"Error during retrieving a previous position: {str(e)}"}
 
     def insert_position(self, new_position, old_id=None):
         print("running insert_position()")
@@ -484,7 +552,7 @@ class MySQLAdapter:
             conn.commit()
         except Exception as e:
             print(str(e))
-            return {"error" : str(e)}
+            return {"error": str(e)}
 
     def update_pnl(self, user_id, new_balance):
 
@@ -525,7 +593,113 @@ class MySQLAdapter:
             traceback.print_exc()
             raise
 
+    def liquidate_positions(self):
+        conn = None
+        cursor = None
+        liquidated = 0
 
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
 
+            cursor.execute("""
+                SELECT symbol, price
+                FROM prices
+            """)
+            price_dict = {r['symbol']: float(r['price']) for r in cursor.fetchall()}
 
+            cursor.execute("""
+                SELECT * 
+                  FROM mocktrade.position_history
+                 WHERE liq_price IS NOT NULL
+                   AND status = 1
+                   AND margin_type = 'isolated'
+            """)
 
+            # logic to check the side(buy or sell), liq_price, and the current price of symbol and execute the liquidation when condition is met
+            active_positions = cursor.fetchall()
+            #3) Iterate and liquidate if necessary
+            for pos in active_positions:
+                symbol = pos['symbol']
+                side = pos['side']
+                liq_price = float(pos['liq_price'])
+                current_price = price_dict.get(symbol)
+
+                if current_price is None:
+                    continue
+
+                # check liquidation condition
+                if (side == 'buy' and current_price <= liq_price) or (side == 'sell' and current_price >= liq_price):
+                    user_id = pos['user_id']
+                    pos_id = pos['id']
+                    margin = float(pos['margin'])
+                    close_pnl = -margin  # isolated -> full margin loss
+
+                    # a) mark the old position snapshot as "closed"
+                    cursor.execute("""
+                        UPDATE mocktrade.position_history
+                        SET status = 2
+                        WHERE status = 1
+                        AND symbol = %s
+                        AND user_id = %s
+                    """, (symbol, user_id))
+
+                    # b) insert a new "liquidation" record
+                    cursor.execute("""
+                        INSERT INTO mocktrade.position_history (
+                            user_id, symbol, size, amount, entry_price,
+                            liq_price, margin, pnl, margin_type,
+                            side, leverage, status, datetime, close_price
+                        ) VALUES (
+                            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                        )
+                    """, (
+                        user_id,
+                        symbol,
+                        0,
+                        0,
+                        None,
+                        None,
+                        0,
+                        close_pnl,  # realized PnL: full margin loss
+                        pos['margin_type'],
+                        side,
+                        pos['leverage'],
+                        4,  # liquidated
+                        datetime.now(timezone('Asia/Seoul')),
+                        current_price  # price at which it was liquidated
+                    ))
+
+                    # c) debit the user's wallet by the lost margin
+                    cursor.execute("""
+                        UPDATE `mocktrade`.`user`
+                        SET balance = balance + %s
+                        WHERE id = %s
+                        AND status = 0    
+                    """, (close_pnl, user_id))
+
+                    # d) cancel any TP/SL orders for this user + symbol
+                    cursor.execute("""
+                        UPDATE mocktrade.order_history
+                        SET status = 4
+                        WHERE user_id = %s
+                        AND symbol = %s
+                        AND `type` IN ('tp', 'sl')    
+                    """, (user_id, symbol))
+
+                    liquidated += 1
+
+            conn.commit()
+            return liquidated
+
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            print(str(e))
+            traceback.print_exc()
+            raise
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()

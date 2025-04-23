@@ -255,77 +255,77 @@ def calculate_position(current_position, order):
         }
 
 
-@router.get('/openLimitOrder', summary='settle limit orders', tags=['EXECUTE API'])
-async def api_executeOpenLimit():
-    mysql = MySQLAdapter()
-    try:
-        price_rows = mysql.get_price()
-        price_dict = {row['symbol']: row for row in price_rows}
-        print(price_dict)
-
-        open_orders = mysql.get_limit_orders_by_status(0)
-        if not open_orders:
-            print("No open orders found")
-            return {"message": "no open orders found"}
-        else:
-            print(f"open orders: {open_orders}")
-
-        for order in open_orders:
-            print("[Processing order]: ", order)
-            order_id = order["id"]
-            user_id = order["user_id"]
-            symbol = order["symbol"]
-            order_price = order["price"]
-            current_price = price_dict.get(symbol, {}).get("price")
-            side = order["side"]
-
-            if current_price is None:
-                continue
-
-            if (side == 'buy' and order_price >= current_price) or (side == 'sell' and order_price <= current_price):
-
-                # 0. retrieve the user's wallet balance before executing further logic
-                wallet_balance = mysql.get_user_balance(user_id)
-
-                # 1. Retrieve the current position status
-                current_position = mysql.get_current_position(user_id, symbol)
-                print(f"[current_position]: {current_position}")
-                # 2. Calculate the new position with a method
-                new_position = calculate_position(current_position, order)
-                # if new_position.get("opposite"):
-                #     projected_balance = wallet_balance + new_position["close_pnl"]
-                #     if new_position["margin"] > projected_balance:
-                #         print("Insufficient margin after flip")
-                #         continue
-
-                print(f"new position: {new_position}")
-                if not current_position:
-                    mysql.insert_position(new_position)
-                else:
-                    mysql.insert_position(new_position, current_position['id'])
-                close_pnl = new_position.get('close_pnl')
-                print('close_pnl: ', close_pnl)
-                if close_pnl:
-                    new_balance = wallet_balance + close_pnl
-                    if new_balance < 0:
-                        print(f"Wallet balance of the user {user_id} going negative")
-                        continue
-                    update_response = mysql.update_pnl(user_id, new_balance)
-                    if "error" in update_response:
-                        print("update_pnl failed:", update_response["error"])
-                        continue
-
-                # 3. Update order status to 1 (settled)
-                mysql.update_status(order_id, 1)
-
-        return {
-            "message": "recalculated positions with triggered limit orders",
-        }
-
-    except Exception as e:
-        print(f"Error settling limit orders: {str(e)}")
-        traceback.print_exc()
-        return {"error": str(e)}
+# @router.get('/openLimitOrder', summary='settle limit orders', tags=['EXECUTE API'])
+# async def api_executeOpenLimit():
+#     mysql = MySQLAdapter()
+#     try:
+#         price_rows = mysql.get_price()
+#         price_dict = {row['symbol']: row for row in price_rows}
+#         print(price_dict)
+#
+#         open_orders = mysql.get_limit_orders_by_status(0)
+#         if not open_orders:
+#             print("No open orders found")
+#             return {"message": "no open orders found"}
+#         else:
+#             print(f"open orders: {open_orders}")
+#
+#         for order in open_orders:
+#             print("[Processing order]: ", order)
+#             order_id = order["id"]
+#             user_id = order["user_id"]
+#             symbol = order["symbol"]
+#             order_price = order["price"]
+#             current_price = price_dict.get(symbol, {}).get("price")
+#             side = order["side"]
+#
+#             if current_price is None:
+#                 continue
+#
+#             if (side == 'buy' and order_price >= current_price) or (side == 'sell' and order_price <= current_price):
+#
+#                 # 0. retrieve the user's wallet balance before executing further logic
+#                 wallet_balance = mysql.get_user_balance(user_id)
+#
+#                 # 1. Retrieve the current position status
+#                 current_position = mysql.get_current_position(user_id, symbol)
+#                 print(f"[current_position]: {current_position}")
+#                 # 2. Calculate the new position with a method
+#                 new_position = calculate_position(current_position, order)
+#                 # if new_position.get("opposite"):
+#                 #     projected_balance = wallet_balance + new_position["close_pnl"]
+#                 #     if new_position["margin"] > projected_balance:
+#                 #         print("Insufficient margin after flip")
+#                 #         continue
+#
+#                 print(f"new position: {new_position}")
+#                 if not current_position:
+#                     mysql.insert_position(new_position)
+#                 else:
+#                     mysql.insert_position(new_position, current_position['id'])
+#                 close_pnl = new_position.get('close_pnl')
+#                 print('close_pnl: ', close_pnl)
+#                 if close_pnl:
+#                     new_balance = wallet_balance + close_pnl
+#                     if new_balance < 0:
+#                         print(f"Wallet balance of the user {user_id} going negative")
+#                         continue
+#                     update_response = mysql.update_pnl(user_id, new_balance)
+#                     if "error" in update_response:
+#                         print("update_pnl failed:", update_response["error"])
+#                         continue
+#
+#                 # 3. Update order status to 1 (settled)
+#                 mysql.update_status(order_id, 1)
+#
+#         return {
+#             "message": "recalculated positions with triggered limit orders",
+#         }
+#
+#     except Exception as e:
+#         print(f"Error settling limit orders: {str(e)}")
+#         traceback.print_exc()
+#         return {"error": str(e)}
 
 
 @router.get('/settleLimitOrders', summary='settle limit orders', tags=['EXECUTE API'])
@@ -333,10 +333,12 @@ async def api_settleLimitOrders():
     count = settle_limit_orders()
     return {"settled orders": count}
 
+
 @router.get('/settleTpslOrders', summary='settle tpsl orders', tags=['EXECUTE API'])
 async def api_settleTpslORders():
     count = settle_tpsl_orders()
-    return {"settled orders": count}
+    return { "settled orders": count }
+
 
 @router.post('/close', summary='close existing position', tags=["EXECUTE API"])
 def api_closePosition(user_id: int, symbol: str):
@@ -347,3 +349,14 @@ def api_closePosition(user_id: int, symbol: str):
     except Exception as e:
         print(str(e))
         return {"error": f"Failed to close the existing position {str(e)}"}
+
+@router.post('/liquidate', summary='liquidate position where condition met', tags=['EXECUTE API'])
+def api_liquidatePositions():
+    mysql = MySQLAdapter()
+    try:
+        count = mysql.liquidate_positions()
+        return {"number of liquidated positions": count }
+    except Exception as e:
+        print(str(e))
+        traceback.print_stack()
+        return {"error": f"Error while liquidating positions: {str(e)}"}
