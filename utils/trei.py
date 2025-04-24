@@ -1127,7 +1127,7 @@ class MySQLAdapter:
 
 
     def buy_market_order(self, user_no: int, symbol: str, margin_type: int, leverage: int, usdt=0, amount=0,tp=0,sl=0):
-        # rd = self._get_redis()
+        rd = self._get_redis()
         user = self.get_user(user_no)
         check = MakeErrorType()
         usdt1=usdt
