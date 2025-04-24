@@ -1,3 +1,5 @@
+import traceback
+
 from fastapi import APIRouter
 from starlette.responses import JSONResponse
 from fastapi import FastAPI, HTTPException
@@ -6,6 +8,8 @@ from pydantic import BaseModel
 from utils.settings import MySQLAdapter
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Optional
+
+from scheduler import update_all_prices
 
 router = APIRouter()
 
@@ -71,5 +75,27 @@ async def api_fetchPrice():
         print(e)
         return "Error during crypto price fetching"
 
+@router.get('/fetchPriceFromRedis', summary='fetch crypto price from redis', tags=["SETTINGS API"])
+async def api_fetchPriceFromRedis(symbol:str):
+    mysql = MySQLAdapter()
+    try:
+        rd = mysql._get_redis()
+        key = f'price:{symbol}USDT'
+        price = rd.get(key)
+        price = float(price.decode())
+        return price
+    except Exception:
+        traceback.print_exc()
+        return "Error during fetching price from redis"
 
+
+@router.get('/updatePriceFromRedis', summary='update all coin prices from redis', tags=["SETTINGS API"])
+async def api_updatePriceFromRedis():
+    try:
+        update_all_prices()
+        print("completed updating from redis")
+        return "completed updating from redis"
+    except Exception:
+        traceback.print_exc()
+        return "Error during updating prices from redis"
 

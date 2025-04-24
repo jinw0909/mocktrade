@@ -24,6 +24,9 @@ mysql = MySQLAdapter()
 trader = TradingService()
 
 def fetch_prices(symbols):
+
+    rd = mysql._get_redis()
+    #new_price = rd.get(f'price:{symbol}USDT')
     """
     Batch‐fetch USD prices for a list of symbols via CoinGecko.
     Returns a dict: { "BTC": 83800.12, "ETH": 1850.34, ... }
@@ -47,6 +50,39 @@ def fetch_prices(symbols):
         if SYMBOL_TO_COINGECKO_ID[sym] in data
     }
 
+
+def fetch_prices_from_redis(symbols):
+    """
+    Pull the latest price for each symbol from Redis.
+    Expects your Redis keys to be named like 'price:BTCUSDT', 'price:ETHUSDT', etc.
+    Returns a dict: { "BTC": 83800.12, "ETH": 1850.34, ... }
+    """
+    # get a Redis client
+    rd = mysql._get_redis()
+
+    # build the list of Redis keys
+    keys = [f"price:{sym}USDT" for sym in symbols]
+
+    # mget all values in one round-trip
+    raw_values = rd.mget(keys)   # returns list of bytes or None
+
+    # zip them back into a dict, skipping missing keys
+    price_dict = {}
+    for sym, raw in zip(symbols, raw_values):
+        if raw is None:
+            # no value in Redis for this symbol
+            print(f"[WARN] no redis price for {sym}")
+            continue
+
+        # decode & parse
+        try:
+            price_dict[sym] = float(raw)
+        except ValueError:
+            print(f"[ERR] bad format for {sym}: {raw!r}")
+
+    return price_dict
+
+
 def update_all_prices():
     mysql = MySQLAdapter()
     conn = mysql._get_connection()
@@ -54,7 +90,7 @@ def update_all_prices():
 
     try:
         # 1) load symbols from your table
-        cursor.execute("SELECT symbol FROM prices")
+        cursor.execute("SELECT symbol FROM mocktrade.prices")
         symbols = [row["symbol"] for row in cursor.fetchall()]
 
         if not symbols:
@@ -62,7 +98,7 @@ def update_all_prices():
             return
 
         # 2) fetch in one go
-        prices = fetch_prices(symbols)
+        prices = fetch_prices_from_redis(symbols)
 
         # 3) write them back
         for sym, price in prices.items():
@@ -158,7 +194,7 @@ scheduler = AsyncIOScheduler(timezone=TZ)
 
 def start_scheduler():
     """Call this on FastAPI startup."""
-    update_all_prices()   # run once immediately
+    # update_all_prices()   # run once immediately
     liquidate_positions()
     settle_limit_orders()
     settle_tpsl_orders()
