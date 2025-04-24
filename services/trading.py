@@ -810,14 +810,14 @@ class TradingService(MySQLAdapter):
             conn.close()
 
     def settle_tpsl_orders(self):
-        mysql = MySQLAdapter()
+        # mysql = MySQLAdapter()
         try:
-            with mysql._get_connection() as conn, conn.cursor() as cursor:
+            with self._get_connection() as conn, conn.cursor() as cursor:
 
-                cursor.execute("SELECT price, symbol FROM mocktrade.prices")
-                price_dict = {r['symbol']: r['price'] for r in cursor.fetchall()}
+                # cursor.execute("SELECT price, symbol FROM mocktrade.prices")
+                # price_dict = {r['symbol']: r['price'] for r in cursor.fetchall()}
 
-                count = self.execute_tpsl(price_dict)
+                count = self.execute_tpsl(price_cache)
                 return count
         except Exception as e:
             print(str(e))

@@ -28,9 +28,6 @@ async def api_test():
         print(e)
     
     return JSONResponse(content = {"message": "Hello Test"}, status_code = 200) 
-    
-
-    return JSONResponse(content={"message": "Hello Test"}, status_code=200)
 
 
 @router.post('/tpsl', summary='set tp/sl of a single order', tags=['SETTINGS API'])

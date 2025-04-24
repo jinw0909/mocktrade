@@ -25,6 +25,14 @@ SYMBOL_TO_COINGECKO_ID = {
 mysql = MySQLAdapter()
 trader = TradingService()
 
+def run_all_jobs():
+    update_all_prices()
+    liquidate_positions()
+    settle_limit_orders()
+    settle_tpsl_orders()
+    calculate_upnl()
+
+
 def fetch_prices(symbols):
 
     rd = mysql._get_redis()
@@ -164,48 +172,23 @@ def settle_tpsl_orders():
 # scheduler wiring
 # ————————————————
 scheduler = AsyncIOScheduler(timezone=TZ)
-# scheduler.add_job(
-#     update_all_prices,
-#     trigger=IntervalTrigger(minutes=10),
-#     id="price_updater",
-#     replace_existing=True,
-# )
-#
-# scheduler.add_job(
-#     calculate_upnl,
-#     trigger=IntervalTrigger(minutes=10),
-#     id="upnl_calculator",
-#     replace_existing=True,
-# )
-#
-# scheduler.add_job(
-#     liquidate_positions(),
-#     trigger=IntervalTrigger(minutes=10),
-#     id="upnl_calculator",
-#     replace_existing=True,
-# )
-# scheduler.add_job(
-#     settle_limit_orders(),
-#     trigger=IntervalTrigger(minutes=10),
-#     id="limit order settler",
-#     replace_existing=True
-# )
-# scheduler.add_job(
-#     settle_tpsl_orders(),
-#     trigger=IntervalTrigger(minutes=10),
-#     id="tpsl order settler",
-#     replace_existing=True
-# )
+scheduler.add_job(
+    run_all_jobs,
+    trigger=IntervalTrigger(minutes=10),
+    id="orchestrator",
+    replace_existing=True
+)
 
 
 def start_scheduler():
     """Call this on FastAPI startup."""
     update_all_prices()   # run once immediately
-    liquidate_positions()
-    settle_limit_orders()
-    settle_tpsl_orders()
-    calculate_upnl()
-    scheduler.start()
+    run_all_jobs()
+    # liquidate_positions()
+    # settle_limit_orders()
+    # settle_tpsl_orders()
+    # calculate_upnl()
+    # scheduler.start()
 
 
 def shutdown_scheduler():

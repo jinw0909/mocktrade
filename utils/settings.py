@@ -33,6 +33,8 @@ import redis
 
 config = Config(".env")
 
+from utils.price_cache import prices as price_cache
+
 
 class MySQLAdapter:
 
@@ -344,8 +346,10 @@ class MySQLAdapter:
                     ORDER BY `id`
                     LIMIT 1
                 """, (retri_id,))
-
-                user_id = cursor.fetchone()['id']
+                row = cursor.fetchone()
+                if not row:
+                    return {"error": "could not find a user with that retri_id"}
+                user_id = row['id']
 
                 if not user_id:
                     print("could not find a user with the retri_id")
@@ -374,17 +378,22 @@ class MySQLAdapter:
                 margin = float(find_result['margin'])
 
                 # 2. Get current price
-                price_sql = """
-                    SELECT price FROM mocktrade.prices
-                    WHERE symbol = %s
-                    ORDER BY updatedAt DESC
-                    LIMIT 1
-                """
-                cursor.execute(price_sql, (symbol,))
-                price_result = cursor.fetchone()
-                if not price_result:
-                    return {"error": "Price not available"}
-                current_price = float(price_result["price"])
+                # price_sql = """
+                #     SELECT price FROM mocktrade.prices
+                #     WHERE symbol = %s
+                #     ORDER BY updatedAt DESC
+                #     LIMIT 1
+                # """
+                # cursor.execute(price_sql, (symbol,))
+                # price_result = cursor.fetchone()
+                # if not price_result:
+                #     return {"error": "Price not available"}
+                # current_price = float(price_result["price"])
+                current_price = price_cache.get(symbol)
+                if current_price is None:
+                    print(f"could not find the value of {symbol}")
+                    raise RuntimeError(f"Could not find the value of {symbol}")
+
 
                 # 3. calculate pnl
                 if side == 'buy':
@@ -602,11 +611,12 @@ class MySQLAdapter:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            cursor.execute("""
-                SELECT symbol, price
-                FROM prices
-            """)
-            price_dict = {r['symbol']: float(r['price']) for r in cursor.fetchall()}
+            # cursor.execute("""
+            #     SELECT symbol, price
+            #     FROM prices
+            # """)
+            # price_dict = {r['symbol']: float(r['price']) for r in cursor.fetchall()}
+            price_dict = price_cache
 
             cursor.execute("""
                 SELECT * 
@@ -712,9 +722,10 @@ class MySQLAdapter:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            # 1) load market prices
-            cursor.execute("SELECT symbol, price FROM mocktrade.prices")
-            price_dict = {r['symbol']: r['price'] for r in cursor.fetchall()}
+            # # 1) load market prices
+            # cursor.execute("SELECT symbol, price FROM mocktrade.prices")
+            # price_dict = {r['symbol']: r['price'] for r in cursor.fetchall()}
+            price_dict = price_cache
 
             # 2) load only the fields we need for active positions
             cursor.execute("""

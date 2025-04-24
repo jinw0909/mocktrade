@@ -336,7 +336,7 @@ async def api_settleLimitOrders():
 
 
 @router.get('/settleTpslOrders', summary='settle tpsl orders', tags=['EXECUTE API'])
-async def api_settleTpslORders():
+async def api_settleTpslOrders():
     count = trader.settle_tpsl_orders()
     return { "settled orders": count }
 
@@ -359,6 +359,7 @@ def api_liquidatePositions():
         print(str(e))
         traceback.print_exc()
         return {"error": f"Error while liquidating positions: {str(e)}"}
+
 
 @router.post('/calculate_upnl', summary='calculate unrealized pnl of active positions', tags=['EXECUTE API'])
 def api_calculateUpnl():
