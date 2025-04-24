@@ -193,4 +193,7 @@ def start_scheduler():
 
 def shutdown_scheduler():
     """Call this on FastAPI shutdown."""
-    scheduler.shutdown(wait=False)
+    try:
+        scheduler.shutdown(wait=False)
+    except AttributeError:
+        pass
