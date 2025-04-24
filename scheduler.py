@@ -9,6 +9,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from utils.settings import MySQLAdapter  # adjust if your adapter lives elsewhere
 from services.trading import TradingService
+
+from utils.price_cache import prices as price_cache
 # CoinGecko simple price endpoint
 API_ENDPOINT = "https://api.coingecko.com/api/v3/simple/price"
 TZ = timezone("Asia/Seoul")
@@ -98,27 +100,31 @@ def update_all_prices():
             return
 
         # 2) fetch in one go
-        prices = fetch_prices_from_redis(symbols)
+        new_prices = fetch_prices_from_redis(symbols)
 
-        # 3) write them back
-        for sym, price in prices.items():
-            cursor.execute(
-                """
-                UPDATE prices
-                   SET price     = %s,
-                       updatedAt = %s
-                 WHERE symbol    = %s
-                """,
-                (price, datetime.now(TZ), sym)
-            )
+        # overwrite the in-memory cache
+        price_cache.clear()
+        price_cache.update(new_prices)
 
-        conn.commit()
-        print(f"[{datetime.now(TZ)}] updated prices for: {', '.join(prices)}")
+        # 3) write them back (optional)
+        # for sym, price in new_prices.items():
+        #     cursor.execute(
+        #         """
+        #         UPDATE prices
+        #            SET price     = %s,
+        #                updatedAt = %s
+        #          WHERE symbol    = %s
+        #         """,
+        #         (price, datetime.now(TZ), sym)
+        #     )
+        #
+        # conn.commit()
+        # print(f"[{datetime.now(TZ)}] updated prices for: {', '.join(new_prices)}")
 
     except Exception as e:
         conn.rollback()
+        traceback.print_exc()
         print(f"[{datetime.now(TZ)}] failed to update prices:", e)
-        raise
 
     finally:
         conn.close()
@@ -194,7 +200,7 @@ scheduler = AsyncIOScheduler(timezone=TZ)
 
 def start_scheduler():
     """Call this on FastAPI startup."""
-    # update_all_prices()   # run once immediately
+    update_all_prices()   # run once immediately
     liquidate_positions()
     settle_limit_orders()
     settle_tpsl_orders()

@@ -2,6 +2,7 @@ from utils.settings import MySQLAdapter
 import traceback
 from datetime import datetime, timedelta
 from pytz import timezone
+from utils.price_cache import prices as price_cache
 
 
 class TradingService(MySQLAdapter):
@@ -306,9 +307,10 @@ class TradingService(MySQLAdapter):
             conn.autocommit(False)
             cursor = conn.cursor()
 
-            # 1) Load prices & open orders
-            cursor.execute("SELECT symbol, price FROM mocktrade.prices")
-            price_dict = {r['symbol']: r['price'] for r in cursor.fetchall()}
+            # # 1) Load prices & open orders
+            # cursor.execute("SELECT symbol, price FROM mocktrade.prices")
+            # price_dict = {r['symbol']: r['price'] for r in cursor.fetchall()}
+            price_dict = price_cache
 
             cursor.execute("""
                 SELECT * FROM mocktrade.order_history
