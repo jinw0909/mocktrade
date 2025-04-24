@@ -928,7 +928,7 @@ class MySQLAdapter:
                             
                         else:
                             print('233333333333333')
-                            self.inser_oder_history(user_no, symbol, 'limit', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 0,price,tp,sl)
+                            self.inser_oder_history(user_no, symbol, 'limit', margin_type, 'buy', price, new_usdt ,self.floor_to_n_decimal(new_amount,qty_ch), leverage, 0,price,tp,sl)
                         self.return_dict_data['results']=[]
                         self.return_dict_data['reCode']=0
                         self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
@@ -1062,7 +1062,7 @@ class MySQLAdapter:
                             self.sell_market_order(user_no , symbol, margin_type1, leverage, usdt1, amount,tp,sl)
                         else:
                     
-                            self.inser_oder_history(user_no, symbol, 'limit', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 0,price,tp,sl)
+                            self.inser_oder_history(user_no, symbol, 'limit', margin_type, 'sell', price, new_usdt ,self.floor_to_n_decimal(new_amount,qty_ch), leverage, 0,price,tp,sl)
                         self.return_dict_data['results']=[]
                         self.return_dict_data['reCode']=0
                         self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
