@@ -800,13 +800,13 @@ class MySQLAdapter:
     def buy_limit_order(self,user_no: int, symbol: str, margin_type: int, leverage: int,price : float, usdt=0, amount=0,tp=0,sl=0 ) :
         user = self.get_user(user_no)
         check = MakeErrorType()
-        # rd = self._get_redis()
-        #
-        # new_price = rd.get(f'price:{symbol}USDT')
-        #
-        # if new_price:  # price 값이 None이 아닌 경우에만 진행
-        #     new_price1 = float(new_price.decode())  # 바이트 문자열을 디코딩하여 float로 변환'
-        #
+        rd = self._get_redis()
+
+        new_price = rd.get(f'price:{symbol}USDT')
+
+        if new_price:  # price 값이 None이 아닌 경우에만 진행
+            new_price1 = float(new_price.decode())  # 바이트 문자열을 디코딩하여 float로 변환'
+
         margin_type1=margin_type
         usdt1=usdt
         # margin_type을 'isolated' 또는 'cross'로 설정
@@ -943,7 +943,8 @@ class MySQLAdapter:
                             
                         else:
                             print('233333333333333')
-                            self.inser_oder_history(user_no, symbol, 'limit', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 0,price,tp,sl)
+
+                            self.inser_oder_history(user_no, symbol, 'limit', margin_type, 'buy', price, new_usdt ,self.floor_to_n_decimal(new_amount,qty_ch), leverage, 0,price,tp,sl)
 
                         self.return_dict_data['results']=[]
                         self.return_dict_data['reCode']=0
@@ -1102,11 +1103,13 @@ class MySQLAdapter:
                     if new_balance >= 0:
                         print('new_balance:',new_balance)
 
-                        # if new_price1>price:
-                        #
-                        #     self.sell_market_order(user_no , symbol, margin_type1, leverage, usdt1, amount,tp,sl)
-                        # else:
-                        self.inser_oder_history(user_no, symbol, 'limit', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 0,price,tp,sl)
+                        
+                        if new_price1>price:
+                            
+                            self.sell_market_order(user_no , symbol, margin_type1, leverage, usdt1, amount,tp,sl)
+                        else:
+                    
+                            self.inser_oder_history(user_no, symbol, 'limit', margin_type, 'sell', price, new_usdt ,self.floor_to_n_decimal(new_amount,qty_ch), leverage, 0,price,tp,sl)
 
                         self.return_dict_data['results']=[]
                         self.return_dict_data['reCode']=0

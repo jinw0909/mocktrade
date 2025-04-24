@@ -374,7 +374,7 @@ class MySQLAdapter:
                         new_dict={}
                         df_data=i[1]
                         order,orty=self.get_posioder(df_data['id'])
-                        
+                        print('======================================',order,'**********************',orty)
                         
                         if  orty ==True:
                      
