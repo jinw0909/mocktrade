@@ -800,13 +800,20 @@ class MySQLAdapter:
     def buy_limit_order(self,user_no: int, symbol: str, margin_type: int, leverage: int,price : float, usdt=0, amount=0,tp=0,sl=0 ) :
         user = self.get_user(user_no)
         check = MakeErrorType()
-        rd = self._get_redis()
+        # rd = self._get_redis()
 
-        new_price = rd.get(f'price:{symbol}USDT')
-
+        #new_price = rd.get(f'price:{symbol}USDT')
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT price FROM mocktrade.prices
+            WHERE symbol = %s
+        """, symbol)
+        new_price = cursor.fetchone()['price']
         if new_price:  # price 값이 None이 아닌 경우에만 진행
-            new_price1 = float(new_price.decode())  # 바이트 문자열을 디코딩하여 float로 변환'
-
+            # new_price1 = float(new_price.decode())  # 바이트 문자열을 디코딩하여 float로 변환'
+            new_price1 = float(new_price)  # 바이트 문자열을 디코딩하여 float로 변환'
+        print(f"price of {symbol} is {new_price1}")
         margin_type1=margin_type
         usdt1=usdt
         # margin_type을 'isolated' 또는 'cross'로 설정
@@ -973,32 +980,33 @@ class MySQLAdapter:
         # margin_type을 'isolated' 또는 'cross'로 설정
 
         # new_price = rd.get(f'price:{symbol}USDT')
-        # conn = self._get_connection()
-        # try:
-        #     if conn:
-        #         with conn.cursor() as cursor:
-        #             sql = """
-        #                 SELECT price FROM mocktrade.prices
-        #                 WHERE symbol = %s
-        #             """
-        #             cursor.execute(sql, (symbol,))
-        #
-        #             row = cursor.fetchone()
-        #             if row is None:
-        #                 return {"error": f"Price for {symbol} not found in DB"}
-        #             new_price = float(row[0])
-        #             print("new_price: ", new_price)
-        #     else:
-        #         return {"error": "could not connect to the local database"}
-        # except Exception as e:
-        #     traceback.print_exc()
-        #     print(str(e))
-        #     return { "error": f"Could not find the price of symbol from the local database, {str(e)}"}
+        conn = self._get_connection()
+        try:
+            if conn:
+                with conn.cursor() as cursor:
+                    sql = """
+                        SELECT price FROM mocktrade.prices
+                        WHERE symbol = %s
+                    """
+                    cursor.execute(sql, (symbol,))
+
+                    row = cursor.fetchone()
+                    if row is None:
+                        return {"error": f"Price for {symbol} not found in DB"}
+                    new_price = float(row[0])
+                    print("new_price: ", new_price)
+            else:
+                return {"error": "could not connect to the local database"}
+        except Exception as e:
+            traceback.print_exc()
+            print(str(e))
+            return { "error": f"Could not find the price of symbol from the local database, {str(e)}"}
 
 
 
-        # if new_price:  # price 값이 None이 아닌 경우에만 진행
-        #     new_price1 = float(new_price.decode())  # 바이트 문자열을 디코딩하여 float로 변환'
+        if new_price:  # price 값이 None이 아닌 경우에만 진행
+            # new_price1 = float(new_price.decode())  # 바이트 문자열을 디코딩하여 float로 변환'
+            new_price1 = float(new_price)
 
         margin_type1=margin_type
         usdt1=usdt
@@ -1130,7 +1138,7 @@ class MySQLAdapter:
 
 
     def buy_market_order(self, user_no: int, symbol: str, margin_type: int, leverage: int, usdt=0, amount=0,tp=0,sl=0):
-        rd = self._get_redis()
+        # rd = self._get_redis()
         user = self.get_user(user_no)
         check = MakeErrorType()
         usdt1=usdt
@@ -1186,9 +1194,14 @@ class MySQLAdapter:
 
                 # price 값 가져오기
 
-                price = rd.get(f'price:{symbol}USDT')
-                
-                
+                # price = rd.get(f'price:{symbol}USDT')
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT price FROM mocktrade.prices
+                    WHERE symbol = %s
+                """, symbol)
+                price = cursor.fetchone()['price']
                 
                 
 

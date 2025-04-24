@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Optional
 from utils.settings import MySQLAdapter
 import traceback
-from services.trading import settle_limit_orders, settle_tpsl_orders
+from services.trading import TradingService
 router = APIRouter()
 
 MAINT_RATE = 0.005         # first notional tier: 0.5 %
@@ -85,8 +85,6 @@ def calc_iso_liq_price(entry_price: float,
         return entry_price * (1 - 1/leverage)
     else:                 # SHORT
         return entry_price * (1 + 1/leverage)
-
-
 
 
 def calculate_position(current_position, order):
@@ -328,21 +326,23 @@ def calculate_position(current_position, order):
 #         return {"error": str(e)}
 
 
+trader = TradingService()
+mysql = MySQLAdapter()
+
 @router.get('/settleLimitOrders', summary='settle limit orders', tags=['EXECUTE API'])
 async def api_settleLimitOrders():
-    count = settle_limit_orders()
+    count = trader.settle_limit_orders()
     return {"settled orders": count}
 
 
 @router.get('/settleTpslOrders', summary='settle tpsl orders', tags=['EXECUTE API'])
 async def api_settleTpslORders():
-    count = settle_tpsl_orders()
+    count = trader.settle_tpsl_orders()
     return { "settled orders": count }
 
 
 @router.post('/close', summary='close existing position', tags=["EXECUTE API"])
 def api_closePosition(user_id: int, symbol: str):
-    mysql = MySQLAdapter()
     try:
         query_result = mysql.close_position(user_id, symbol)
         return query_result
@@ -352,11 +352,20 @@ def api_closePosition(user_id: int, symbol: str):
 
 @router.post('/liquidate', summary='liquidate position where condition met', tags=['EXECUTE API'])
 def api_liquidatePositions():
-    mysql = MySQLAdapter()
     try:
         count = mysql.liquidate_positions()
         return {"number of liquidated positions": count }
     except Exception as e:
         print(str(e))
-        traceback.print_stack()
+        traceback.print_exc()
         return {"error": f"Error while liquidating positions: {str(e)}"}
+
+@router.post('/calculate_upnl', summary='calculate unrealized pnl of active positions', tags=['EXECUTE API'])
+def api_calculateUpnl():
+    try:
+        count = mysql.calculate_unrealized_pnl()
+        return {"number of unrealized pnl derived": count }
+    except Exception as e:
+        print(str(e))
+        traceback.print_exc()
+        return { "error": f"Error while calculating unrealized pnl"}

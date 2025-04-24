@@ -13,6 +13,10 @@ from starlette.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from routers import trei_routers, settings_routers, frontapi_routers
 
+# import scheduler control
+from scheduler import start_scheduler, shutdown_scheduler
+
+
 # FastAPI 애플리케이션 설정
 app = FastAPI()
 
@@ -64,7 +68,15 @@ app.include_router(execute_routers.router, prefix='/execute')
 # app.include_router(que_chart.router, prefix='/que', tags=['Que Chart API'])
 # app.include_router(ticker.router, prefix='/ticker', tags=['Ticker API'])
 
+@app.on_event("startup")
+async def on_startup():
+    # spin up the price‐updater
+    start_scheduler()
 
+@app.on_event("shutdown")
+async def on_shutdown():
+    # clean shutdown of the scheduler
+    shutdown_scheduler()
 
 # 메인 화면
 @app.get('/', tags=['Main'], summary='메인 화면 200 지정', deprecated=True)

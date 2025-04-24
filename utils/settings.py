@@ -703,3 +703,90 @@ class MySQLAdapter:
                 cursor.close()
             if conn:
                 conn.close()
+
+    def calculate_unrealized_pnl(self):
+        conn = None
+        cursor = None
+        row_count = 0
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # 1) load market prices
+            cursor.execute("SELECT symbol, price FROM mocktrade.prices")
+            price_dict = {r['symbol']: r['price'] for r in cursor.fetchall()}
+
+            # 2) load only the fields we need for active positions
+            cursor.execute("""
+                SELECT
+                  id,
+                  user_id,
+                  symbol,
+                  entry_price,
+                  amount,
+                  side,
+                  leverage,
+                  margin
+                FROM mocktrade.position_history
+                WHERE status = 1
+            """)
+            active_positions = cursor.fetchall()
+
+            # 3) loop & compute
+            for pos in active_positions:
+                pos_id        = pos['id']
+                user_id       = pos['user_id']
+                symbol        = pos['symbol']
+                entry_price   = float(pos['entry_price'])
+                amount        = float(pos['amount'])
+                side          = pos['side']
+                original_margin = float(pos['margin'])
+
+                current_price = price_dict.get(symbol)
+                if current_price is None:
+                    print(f"[WARN] no price for symbol {symbol}, skipping")
+                    continue
+
+                # PnL formula flips for shorts
+                if side == 'buy':
+                    unrealized_pnl = (current_price - entry_price) * amount
+                else:  # sell/short
+                    unrealized_pnl = (entry_price - current_price) * amount
+
+                # percent of your initial margin
+                if original_margin != 0:
+                    unrealized_pnl_pct = (unrealized_pnl / original_margin) * 100
+                else:
+                    unrealized_pnl_pct = 0.0
+
+                # 4) update the row
+                cursor.execute(
+                    """
+                    UPDATE mocktrade.position_history
+                       SET unrealized_pnl            = %s,
+                           unrealized_pnl_pct = %s
+                     WHERE id     = %s
+                       AND user_id = %s
+                       AND status  = 1
+                    """,
+                    (unrealized_pnl,
+                     unrealized_pnl_pct,
+                     pos_id,
+                     user_id)
+                )
+                row_count += 1
+
+            conn.commit()
+            return row_count
+
+        except Exception:
+            if conn:
+                conn.rollback()
+            traceback.print_exc()
+            raise
+
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
