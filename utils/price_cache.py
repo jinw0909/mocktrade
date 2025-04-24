@@ -1,4 +1,3 @@
 from typing import Dict
 
-prices = Dict[str, float] = {}
-
+prices: Dict[str, float] = {}
