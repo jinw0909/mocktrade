@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Optional
 
 from scheduler import update_all_prices
+from utils.price_cache import prices as price_cache
 
 router = APIRouter()
 
@@ -99,3 +100,19 @@ async def api_updatePriceFromRedis():
         traceback.print_exc()
         return "Error during updating prices from redis"
 
+@router.post('/modifyPriceCache', summary='modify the price of a symbol in price cache', tags=["SETTINGS API"])
+async def api_modifyPriceCache(symbol: str, price: float):
+    try:
+        price_cache[symbol] = price
+        return {"success": f"successfully updated the price of {symbol} to {price}"}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(500, detail=str(e))
+
+@router.get('/priceCache', summary='show the current price cache', tags=["SETTINGS API"])
+async def api_showPriceCache():
+    try:
+        return { "prices": price_cache }
+    except Exception:
+        print("Error, couldn't show the price cache")
+        return {"error": "Failed to show the price cache" }

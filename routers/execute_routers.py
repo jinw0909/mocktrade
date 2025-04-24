@@ -369,4 +369,3 @@ def api_calculateUpnl():
         print(str(e))
         traceback.print_exc()
         return { "error": f"Error while calculating unrealized pnl"}
-
