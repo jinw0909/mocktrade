@@ -13,6 +13,7 @@ logger = logging.getLogger("pnl_ws")
 position_redis = aioredis.from_url("redis://localhost:6379/0", decode_responses=True)
 price_redis    = aioredis.from_url("redis://172.31.11.200:6379/0", decode_responses=True)
 
+
 @router.websocket("/{user_id}")
 async def pnl_stream(websocket: WebSocket, user_id: int):
     await websocket.accept()
@@ -27,7 +28,7 @@ async def pnl_stream(websocket: WebSocket, user_id: int):
                 continue
 
             symbols    = list(positions.keys())
-            price_keys = [f"price:{sym}" for sym in symbols]
+            price_keys = [f"price:{sym}USDT" for sym in symbols]
             raw_prices = await price_redis.mget(*price_keys)
 
             updates = []
