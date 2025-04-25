@@ -71,6 +71,7 @@ app.include_router(execute_routers.router, prefix='/execute')
 @app.on_event("startup")
 async def on_startup():
     # spin up the price‐updater
+    print("starting job scheduler...")
     start_scheduler()
 
 @app.on_event("shutdown")

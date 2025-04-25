@@ -2,6 +2,7 @@
 import traceback
 from datetime import datetime
 import requests
+import logging
 
 from pytz import timezone
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -12,6 +13,11 @@ from services.trading import TradingService
 
 from utils.price_cache import prices as price_cache
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
 # CoinGecko simple price endpoint
 API_ENDPOINT = "https://api.coingecko.com/api/v3/simple/price"
 TZ = timezone("Asia/Seoul")
@@ -89,7 +95,8 @@ def fetch_prices_from_redis(symbols):
         try:
             price_dict[sym] = float(raw)
         except ValueError:
-            print(f"[ERR] bad format for {sym}: {raw!r}")
+            # print(f"[ERR] bad format for {sym}: {raw!r}")
+            logger.exception(f"[ERR] bad format for {sym}: {raw!r}")
 
     return price_dict
 
@@ -105,7 +112,8 @@ def update_all_prices():
         symbols = [row["symbol"] for row in cursor.fetchall()]
 
         if not symbols:
-            print(f"[{datetime.now(TZ)}] no symbols found to update")
+            # print(f"[{datetime.now(TZ)}] no symbols found to update")
+            logger.info(f"[{datetime.now(TZ)}] no symbols found to update")
             return
 
         # 2) fetch in one go
@@ -129,12 +137,15 @@ def update_all_prices():
         #
         # conn.commit()
         # print(f"[{datetime.now(TZ)}] updated prices for: {', '.join(new_prices)}")
-        print(f"updated {len(new_prices)} number of prices from redis")
+        # print(f"updated {len(new_prices)} number of prices from redis")
+        logger.info(f"updated {len(new_prices)} number of prices from redis")
 
     except Exception as e:
         conn.rollback()
-        traceback.print_exc()
-        print(f"[{datetime.now(TZ)}] failed to update prices:", e)
+        # traceback.print_exc()
+        logger.exception("failed to update prices")
+        # print(f"[{datetime.now(TZ)}] failed to update prices:", e)
+        logger.info(f"[{datetime.now(TZ)}] failed to update prices:", e)
 
     finally:
         conn.close()
@@ -143,38 +154,41 @@ def update_all_prices():
 def calculate_upnl():
     try:
         count = mysql.calculate_unrealized_pnl()
-        print(
-            f'executing calculate_upnl at {datetime.now(timezone("Asia/Seoul"))}. Total {count} number of upnl derived')
+        # print(f'executing calculate_upnl at {datetime.now(timezone("Asia/Seoul"))}. Total {count} number of upnl derived')
+        logger.info(f'executing calculate_upnl at {datetime.now(timezone("Asia/Seoul"))}. Total {count} number of upnl derived')
     except Exception:
-        traceback.print_exc()
-
+        # traceback.print_exc()
+        logger.exception("Failed to update prices:")
 
 def liquidate_positions():
     try:
         count = mysql.liquidate_positions()
-        print(
-            f"executing liquidate positions at {datetime.now(timezone('Asia/Seoul'))}. Total {count} number of positions liquidated")
+        # print(f"executing liquidate positions at {datetime.now(timezone('Asia/Seoul'))}. Total {count} number of positions liquidated")
+        logger.info(f"executing liquidate positions at {datetime.now(timezone('Asia/Seoul'))}. Total {count} number of positions liquidated")
     except Exception:
-        traceback.print_exc()
+        # traceback.print_exc()
+        logger.exception("Failed to update prices:")
 
 
 def settle_limit_orders():
     try:
         count = trader.settle_limit_orders()
-        print(
-            f"executing settle_limit_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} limit orders settled")
+        # print(f"executing settle_limit_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} limit orders settled")
+        logger.info(f"executing settle_limit_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} limit orders settled")
     except Exception:
-        traceback.print_exc()
+        # traceback.print_exc()
+        logger.exception("Failed to update prices:")
 
 
 def settle_tpsl_orders():
     try:
         count = trader.settle_tpsl_orders()
-        print(
-            f"executing settle_tpsl_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} tp/sl orders settled")
-    except Exception:
-        traceback.print_exc()
+        # print(f"executing settle_tpsl_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} tp/sl orders settled")
+        logger.info(f"executing settle_tpsl_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} tp/sl orders settled")
 
+    except Exception:
+        # traceback.print_exc()
+        logger.exception("Failed to settle tp/sl orders")
 
 # ————————————————
 # scheduler wiring
