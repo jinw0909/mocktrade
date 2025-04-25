@@ -82,7 +82,7 @@ def fetch_prices_from_redis(symbols):
     for sym, raw in zip(symbols, raw_values):
         if raw is None:
             # no value in Redis for this symbol
-            print(f"[WARN] no redis price for {sym}")
+            # print(f"[WARN] no redis price for {sym}")
             continue
 
         # decode & parse
@@ -129,6 +129,7 @@ def update_all_prices():
         #
         # conn.commit()
         # print(f"[{datetime.now(TZ)}] updated prices for: {', '.join(new_prices)}")
+        print(f"updated {len(new_prices)} number of prices from redis")
 
     except Exception as e:
         conn.rollback()

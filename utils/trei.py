@@ -800,16 +800,11 @@ class MySQLAdapter:
     def buy_limit_order(self,user_no: int, symbol: str, margin_type: int, leverage: int,price : float, usdt=0, amount=0,tp=0,sl=0 ) :
         user = self.get_user(user_no)
         check = MakeErrorType()
-        # rd = self._get_redis()
+        rd = self._get_redis()
 
-        #new_price = rd.get(f'price:{symbol}USDT')
+        new_price = rd.get(f'price:{symbol}USDT')
         conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT price FROM mocktrade.prices
-            WHERE symbol = %s
-        """, symbol)
-        new_price = cursor.fetchone()['price']
+
         if new_price:  # price 값이 None이 아닌 경우에만 진행
             # new_price1 = float(new_price.decode())  # 바이트 문자열을 디코딩하여 float로 변환'
             new_price1 = float(new_price)  # 바이트 문자열을 디코딩하여 float로 변환'
