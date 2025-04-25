@@ -190,7 +190,7 @@ scheduler.add_job(
 
 def start_scheduler():
     """Call this on FastAPI startup."""
-    # update_all_prices()   # run once immediately
+    update_all_prices()   # run once immediately
     run_all_jobs()
     # liquidate_positions()
     # settle_limit_orders()
