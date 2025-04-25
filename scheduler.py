@@ -174,7 +174,7 @@ def settle_tpsl_orders():
 scheduler = AsyncIOScheduler(timezone=TZ)
 scheduler.add_job(
     run_all_jobs,
-    trigger=IntervalTrigger(minutes=10),
+    trigger=IntervalTrigger(minutes=1),
     id="orchestrator",
     replace_existing=True
 )
