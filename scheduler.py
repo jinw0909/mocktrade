@@ -11,6 +11,7 @@ from utils.settings import MySQLAdapter  # adjust if your adapter lives elsewher
 from services.trading import TradingService
 
 from utils.price_cache import prices as price_cache
+
 # CoinGecko simple price endpoint
 API_ENDPOINT = "https://api.coingecko.com/api/v3/simple/price"
 TZ = timezone("Asia/Seoul")
@@ -25,6 +26,7 @@ SYMBOL_TO_COINGECKO_ID = {
 mysql = MySQLAdapter()
 trader = TradingService()
 
+
 def run_all_jobs():
     update_all_prices()
     liquidate_positions()
@@ -34,7 +36,6 @@ def run_all_jobs():
 
 
 def fetch_prices(symbols):
-
     rd = mysql._get_redis()
     #new_price = rd.get(f'price:{symbol}USDT')
     """
@@ -74,7 +75,7 @@ def fetch_prices_from_redis(symbols):
     keys = [f"price:{sym}USDT" for sym in symbols]
 
     # mget all values in one round-trip
-    raw_values = rd.mget(keys)   # returns list of bytes or None
+    raw_values = rd.mget(keys)  # returns list of bytes or None
 
     # zip them back into a dict, skipping missing keys
     price_dict = {}
@@ -141,14 +142,17 @@ def update_all_prices():
 def calculate_upnl():
     try:
         count = mysql.calculate_unrealized_pnl()
-        print(f'executing calculate_upnl at {datetime.now(timezone("Asia/Seoul"))}. Total {count} number of upnl derived')
+        print(
+            f'executing calculate_upnl at {datetime.now(timezone("Asia/Seoul"))}. Total {count} number of upnl derived')
     except Exception:
         traceback.print_exc()
+
 
 def liquidate_positions():
     try:
         count = mysql.liquidate_positions()
-        print(f"executing liquidate positions at {datetime.now(timezone('Asia/Seoul'))}. Total {count} number of positions liquidated")
+        print(
+            f"executing liquidate positions at {datetime.now(timezone('Asia/Seoul'))}. Total {count} number of positions liquidated")
     except Exception:
         traceback.print_exc()
 
@@ -156,7 +160,8 @@ def liquidate_positions():
 def settle_limit_orders():
     try:
         count = trader.settle_limit_orders()
-        print(f"executing settle_limit_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} limit orders settled")
+        print(
+            f"executing settle_limit_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} limit orders settled")
     except Exception:
         traceback.print_exc()
 
@@ -164,9 +169,11 @@ def settle_limit_orders():
 def settle_tpsl_orders():
     try:
         count = trader.settle_tpsl_orders()
-        print(f"executing settle_tpsl_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} tp/sl orders settled")
+        print(
+            f"executing settle_tpsl_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} tp/sl orders settled")
     except Exception:
         traceback.print_exc()
+
 
 # ————————————————
 # scheduler wiring
@@ -182,13 +189,13 @@ scheduler.add_job(
 
 def start_scheduler():
     """Call this on FastAPI startup."""
-    update_all_prices()   # run once immediately
+    # update_all_prices()   # run once immediately
     run_all_jobs()
     # liquidate_positions()
     # settle_limit_orders()
     # settle_tpsl_orders()
     # calculate_upnl()
-    # scheduler.start()
+    scheduler.start()
 
 
 def shutdown_scheduler():
