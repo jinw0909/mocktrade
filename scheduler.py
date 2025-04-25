@@ -10,6 +10,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from utils.settings import MySQLAdapter  # adjust if your adapter lives elsewhere
 from services.trading import TradingService
+from utils.local_redis import update_position_status_to_redis
 
 from utils.price_cache import prices as price_cache
 
@@ -34,7 +35,9 @@ def run_all_jobs():
     liquidate_positions()
     settle_limit_orders()
     settle_tpsl_orders()
+    update_position_status_to_redis()
     calculate_upnl()
+
 
 
 def fetch_prices(symbols):
