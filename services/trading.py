@@ -3,6 +3,13 @@ import traceback
 from datetime import datetime, timedelta
 from pytz import timezone
 from utils.price_cache import prices as price_cache
+import logging
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
 
 
 class TradingService(MySQLAdapter):
@@ -34,7 +41,8 @@ class TradingService(MySQLAdapter):
 
         # case 1. No current position -> create new
         if not current_position:
-            print("case 1, no current position")
+            # print("case 1, no current position")
+            logger.log("case 1, no current position")
             liq_price = self.calc_iso_liq_price(
                 price,
                 leverage,
