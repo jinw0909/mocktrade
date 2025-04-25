@@ -11,7 +11,7 @@ from fastapi import Request
 from urllib.parse import parse_qs
 from starlette.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from routers import trei_routers, settings_routers, frontapi_routers
+from routers import trei_routers, settings_routers, frontapi_routers, websocket_routers
 
 # import scheduler control
 from scheduler import start_scheduler, shutdown_scheduler
@@ -54,6 +54,7 @@ app.include_router(trei_routers.router, prefix='/trading')
 app.include_router(frontapi_routers.router, prefix='/user')
 app.include_router(settings_routers.router, prefix='/settings')
 app.include_router(execute_routers.router, prefix='/execute')
+app.include_router(websocket_routers.router, prefix='/ws')
 # app.include_router(auth_routers.router, prefix='/session')
 # @app.get('/list', tags=['코인 리스트'], summary='코인 항목')
 # async def ticker_list():
@@ -81,10 +82,12 @@ async def on_startup():
     print("starting job scheduler...")
     start_scheduler()
 
+
 @app.on_event("shutdown")
 async def on_shutdown():
     # clean shutdown of the scheduler
     shutdown_scheduler()
+
 
 # 메인 화면
 @app.get('/', tags=['Main'], summary='메인 화면 200 지정', deprecated=True)
