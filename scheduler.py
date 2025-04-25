@@ -14,7 +14,8 @@ from utils.local_redis import update_position_status_to_redis
 
 from utils.price_cache import prices as price_cache
 
-logger = logging.getLogger('uvicorn')
+
+logger = logging.getLogger(__name__)
 # CoinGecko simple price endpoint
 API_ENDPOINT = "https://api.coingecko.com/api/v3/simple/price"
 TZ = timezone("Asia/Seoul")

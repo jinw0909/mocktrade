@@ -16,6 +16,13 @@ from routers import trei_routers, settings_routers, frontapi_routers
 # import scheduler control
 from scheduler import start_scheduler, shutdown_scheduler
 
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
+)
+
 
 # FastAPI 애플리케이션 설정
 app = FastAPI()

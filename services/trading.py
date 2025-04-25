@@ -5,7 +5,7 @@ from pytz import timezone
 from utils.price_cache import prices as price_cache
 import logging
 
-logger = logging.getLogger('uvicorn')
+logger = logging.getLogger(__name__)
 
 class TradingService(MySQLAdapter):
 
