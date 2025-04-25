@@ -5,12 +5,7 @@ from pytz import timezone
 from utils.price_cache import prices as price_cache
 import logging
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
-)
-
+logger = logging.getLogger('uvicorn')
 
 class TradingService(MySQLAdapter):
 
@@ -41,8 +36,7 @@ class TradingService(MySQLAdapter):
 
         # case 1. No current position -> create new
         if not current_position:
-            # print("case 1, no current position")
-            logger.log("case 1, no current position")
+            logger.info("case 1, no current position")
             liq_price = self.calc_iso_liq_price(
                 price,
                 leverage,
@@ -96,7 +90,7 @@ class TradingService(MySQLAdapter):
 
         # case 2: Same-side -> merge positions
         if current_side == side:
-            print("case 2: same side")
+            logger.info("case 2: same side")
             total_amount = current_amount + amount
             total_value = (current_entry_price * current_amount) + (price * amount)
             avg_entry_price = total_value / total_amount
@@ -131,7 +125,7 @@ class TradingService(MySQLAdapter):
 
         # 🔁 Case 3: Opposite-side → partial close, full close, or flip
         if amount < current_amount:
-            print("case 3-1, opposite side, partial close")
+            logger.info("case 3-1, opposite side, partial close")
             # Partial close — reduce position
             new_amount = current_amount - amount
             close_pnl = (price - current_entry_price) * amount if current_side == 'buy' else (
@@ -170,7 +164,7 @@ class TradingService(MySQLAdapter):
             }
 
         elif amount == current_amount:
-            print("case 3-2, opposite side, full close")
+            logger.info("case 3-2, opposite side, full close")
             # Full close — no new position
             close_pnl = (price - current_entry_price) * amount if current_side == 'buy' else (
                                                                                                      current_entry_price - price) * amount
@@ -199,7 +193,7 @@ class TradingService(MySQLAdapter):
 
         else:
             # Flip — close current, open new opposite
-            print("case 3-3, opposite side, flip")
+            logger.info("case 3-3, opposite side, flip")
             flip_amount = amount - current_amount
             close_pnl = (price - current_entry_price) * current_amount if current_side == 'buy' else (
                                                                                                              current_entry_price - price) * current_amount
@@ -231,80 +225,6 @@ class TradingService(MySQLAdapter):
                 "close": True,
                 "close_price": price
             }
-
-    # def open_tpsl_orders(order):
-    #     mysql = MySQLAdapter()
-    #     conn = None
-    #     cursor = None
-    #
-    #     try:
-    #         print("opening tp/sl orders from the triggered limit order")
-    #         user_id = order['user_id']
-    #         symbol = order['symbol']
-    #         limit_tp = order['tp']
-    #         limit_sl = order['sl']
-    #         limit_amount = order['amount']
-    #         limit_side = order['side']
-    #
-    #         order_side = 'sell' if limit_side == 'buy' else 'buy'
-    #         conn = mysql._get_connection()
-    #         cursor = conn.cursor()
-    #
-    #         if limit_tp:
-    #             cursor.execute("""
-    #                 INSERT INTO mocktrade.order_history (
-    #                     user_id, symbol, `type`, margin_type, side, amount, status
-    #                     ,insert_time, update_time, tp )
-    #                 VALUES (
-    #                     %s,%s,%s,%s,%s,%s,%s,%s,%s,%s )
-    #             """, (
-    #                 user_id,
-    #                 symbol,
-    #                 'tp',
-    #                 'isolated',
-    #                 order_side,
-    #                 limit_amount,
-    #                 0,
-    #                 datetime.now(timezone("Asia/Seoul")),
-    #                 datetime.now(timezone("Asia/Seoul")),
-    #                 limit_tp
-    #             ))
-    #
-    #         if limit_sl:
-    #             cursor.execute("""
-    #                 INSERT INTO mocktrade.order_history (
-    #                     user_id, symbol, `type`, margin_type, side, amount, status
-    #                     ,insert_time, update_time, sl )
-    #                 VALUES (
-    #                     %s,%s,%s,%s,%s,%s,%s,%s,%s,%s )
-    #             """, (
-    #                 user_id,
-    #                 symbol,
-    #                 'sl',
-    #                 'isolated',
-    #                 order_side,
-    #                 limit_amount,
-    #                 0,
-    #                 datetime.now(timezone("Asia/Seoul")),
-    #                 datetime.now(timezone("Asia/Seoul")),
-    #                 limit_sl
-    #             ))
-    #
-    #         conn.commit()
-    #         print("successfully created tp/sl orders from the triggered limit order")
-    #         return {"success": "successfully created tp/sl orders from the triggered limit order"}
-    #
-    #     except Exception as e:
-    #         conn.rollback()
-    #         print(str(e))
-    #         traceback.print_exc()
-    #         raise
-    #
-    #     finally:
-    #         if cursor:
-    #             cursor.close()
-    #         if conn:
-    #             conn.close()
 
     def settle_limit_orders(self):
         conn = None
@@ -439,7 +359,7 @@ class TradingService(MySQLAdapter):
                 )
 
                 if (order["tp"] or order["sl"]) and new_position['amount'] > 0:
-                    print("opening tp/sl orders from the triggered limit order")
+                    logger.info("opening tp/sl orders from the triggered limit order")
                     symbol = order['symbol']
                     limit_tp = order['tp']
                     limit_sl = order['sl']
@@ -468,7 +388,7 @@ class TradingService(MySQLAdapter):
                             limit_tp,
                             order_id
                         ))
-                        print("successfully opened the take profit order from the triggered limit order")
+                        logger.info("successfully opened the take profit order from the triggered limit order")
 
                     if limit_sl:
                         cursor.execute("""
@@ -490,17 +410,17 @@ class TradingService(MySQLAdapter):
                             limit_sl,
                             order_id
                         ))
-                        print("successfully opened the stop loss order from the triggered limit order")
+                        logger.info("successfully opened the stop loss order from the triggered limit order")
 
                 row_count += 1
-                print("row_count += 1 : ", row_count)
+                logger.info(f"row_count += 1 : {row_count}")
 
             conn.commit()
             return row_count
 
         except Exception:
             conn.rollback()
-            traceback.print_exc()
+            logger.exception("failed to settle limit orders")
             raise
         finally:
             if cursor:
@@ -541,7 +461,7 @@ class TradingService(MySQLAdapter):
                 current_price = price_dict.get(symbol)
                 if current_price is None:
                     continue
-                print("current price: ", current_price)
+                logger.info(f"current price: {current_price}")
 
                 cursor.execute("""
                     SELECT * FROM `mocktrade`.`position_history`
@@ -559,7 +479,7 @@ class TradingService(MySQLAdapter):
                            SET `status` = 4
                          WHERE `id` = %s
                     """, (order_id,))
-                    print("Cannot find a position of a symbol to apply tp/sl order ")
+                    logger.error("Cannot find a position of a symbol to apply tp/sl order ")
                     continue
 
                 tp_sl_type = o['type']  # 'tp' or 'sl'
@@ -568,7 +488,7 @@ class TradingService(MySQLAdapter):
                 pos_status = pos['status']
                 pos_id = pos['id']
 
-                print('pos_id: ', pos['id'])
+                logger.info(f'pos_id: {pos["id"]}')
 
                 # skip if the position is already closed or liquidated
                 if pos_status == 3 or pos_status == 4:
@@ -581,7 +501,7 @@ class TradingService(MySQLAdapter):
                            AND `symbol` = %s
                            AND `id` = %s
                     """, (user_id, symbol, pos_id))
-                    print("Position is closed")
+                    logger.info("Position is closed")
                     continue
 
                 elif pos_status == 1:
@@ -803,7 +723,7 @@ class TradingService(MySQLAdapter):
                             AND or_id = %s
                         """, (user_id, symbol, or_id))
 
-                    print("executed tp/sl order with id of: ", order_id)
+                    logger.info(f"executed tp/sl order with id of: {order_id}")
                     settled += 1
 
             conn.commit()
@@ -811,7 +731,7 @@ class TradingService(MySQLAdapter):
 
         except Exception:
             conn.rollback()
-            traceback.print_exc()
+            logger.exception("failed to execute tp/sl order")
             raise
 
         finally:
@@ -828,6 +748,5 @@ class TradingService(MySQLAdapter):
                 count = self.execute_tpsl(price_cache)
                 return count
         except Exception as e:
-            print(str(e))
-            traceback.print_exc()
+            logger.exception("Failed to settle tp/sl orders")
             return {"error": "Error during settling tpsl orders"}

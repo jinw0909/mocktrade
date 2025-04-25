@@ -1,4 +1,5 @@
 import traceback
+import logging
 
 from fastapi import APIRouter
 from starlette.responses import JSONResponse
@@ -12,22 +13,9 @@ from typing import Optional
 from scheduler import update_all_prices
 from utils.price_cache import prices as price_cache
 
+
 router = APIRouter()
-
-
-@router.get('/test', summary='test router', tags=['SETTINGS API'])
-async def api_test():
-    # '''
-
-    # '''
-    mysql = MySQLAdapter()
-    
-    try:
-        mysql.get_signal()
-    except Exception as e:
-        print(e)
-    
-    return JSONResponse(content = {"message": "Hello Test"}, status_code = 200) 
+logger = logging.getLogger('uvicorn')
 
 
 @router.post('/tpsl', summary='set tp/sl of a single order', tags=['SETTINGS API'])
@@ -38,15 +26,15 @@ async def api_tpsl(order_no: int, user_no: int, tp: float, sl: float):
     try:
         userId = mysql.get_userId(order_no)
         if userId == 0 or userId != user_no:
-            print('Invalid Request')
+            logger.error('Invalid Request')
             responseMessage = "Invalid Request"
         else:
             updateResult = mysql.set_tpsl(order_no, tp, sl)
-            print(updateResult)
+            logger.info(f"{updateResult}")
             responseMessage = updateResult
 
     except Exception as e:
-        print(e)
+        logger.exception("failed to set tp/sl orders")
         responseMessage = f"Exception occurred: {str(e)}"
 
     return JSONResponse(content={"message": responseMessage}, status_code=200)
@@ -59,7 +47,7 @@ async def api_getUser(user_no: int):
         user = mysql.get_user(user_no)
         return user
     except Exception as e:
-        print(e)
+        logger.exception("failed to get user")
     # return JSONResponse(content = {"message": "reload test"}, status_Code = 200)
 
 
@@ -70,7 +58,7 @@ async def api_fetchPrice():
         fetchResult = mysql.fetch_price()
         return fetchResult
     except Exception as e:
-        print(e)
+        logger.exception("failed to fetch prices")
         return "Error during crypto price fetching"
 
 @router.get('/fetchPriceFromRedis', summary='fetch crypto price from redis', tags=["SETTINGS API"])
@@ -83,7 +71,7 @@ async def api_fetchPriceFromRedis(symbol:str):
         price = float(price.decode())
         return price
     except Exception:
-        traceback.print_exc()
+        logger.exception("Error during fetching price from redis")
         return "Error during fetching price from redis"
 
 
@@ -94,7 +82,7 @@ async def api_updatePriceFromRedis():
         print("completed updating from redis")
         return "completed updating from redis"
     except Exception:
-        traceback.print_exc()
+        logger.exception("Error during updated prices from redis")
         return "Error during updating prices from redis"
 
 @router.post('/modifyPriceCache', summary='modify the price of a symbol in price cache', tags=["SETTINGS API"])
@@ -104,11 +92,13 @@ async def api_modifyPriceCache(symbol: str, price: float):
         return {"success": f"successfully updated the price of {symbol} to {price}"}
     except Exception as e:
         traceback.print_exc()
+        logger.exception(f"failed to update price of symbol : {symbol}")
         raise HTTPException(500, detail=str(e))
 
 @router.get('/priceCache', summary='show the current price cache', tags=["SETTINGS API"])
 async def api_showPriceCache():
     try:
+        logger.info("returning the current price cache...")
         return { "prices": price_cache }
     except Exception:
         print("Error, couldn't show the price cache")

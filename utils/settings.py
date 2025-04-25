@@ -3,6 +3,8 @@ import sys
 
 import httpx
 import pymysql.cursors
+import logging
+
 from pymysql.cursors import DictCursor
 import json
 from pymysql.connections import Connection
@@ -35,6 +37,7 @@ config = Config(".env")
 
 from utils.price_cache import prices as price_cache
 
+logger = logging.getLogger("uvicorn")
 
 class MySQLAdapter:
 
@@ -63,7 +66,7 @@ class MySQLAdapter:
             connection.ping(False)
 
         except Exception as e:
-            print(e)
+            logger.exception("failed to get db connection")
         else:
             return connection
 
@@ -77,7 +80,7 @@ class MySQLAdapter:
 
 
         except Exception as e:
-            print(e)
+            logger.exception("failed to get redis connection")
         else:
             return connection
 
@@ -95,7 +98,7 @@ class MySQLAdapter:
                     conn.commit()
                     return "tp and sl updated successfully"
         except Exception as e:
-            print(e)
+            logger.exception("failed to set tp and sl")
 
         return "failed to set tp sl of order"
 
@@ -115,7 +118,7 @@ class MySQLAdapter:
                     cursor.execute(sql)
                     result = cursor.fetchone()
 
-                    print(result)
+                    logger.info(f"{result}")
 
                     if result:
 
@@ -125,10 +128,10 @@ class MySQLAdapter:
                         return 0
 
             else:
-                print("No DB connection")
+                logger.error("No DB connection")
                 return 0
         except Exception as e:
-            print(e)
+            logger.exception("failed to get user from the order")
             return 0
 
     def get_user(self, user_no):
@@ -142,7 +145,7 @@ class MySQLAdapter:
                 conn.close()
                 return row  # returns a dict or None
         except Exception as e:
-            print(e)
+            logger.exception("failed to get the user info")
             return None
 
     def fetch_price(self):
@@ -189,7 +192,7 @@ class MySQLAdapter:
                     "data": saved_prices
                 }
             else:
-                print("DB connection failed")
+                logger.error("DB connection failed")
                 return {
                     "error": "DB connection failed"
                 }
@@ -209,10 +212,10 @@ class MySQLAdapter:
                 conn.close()
                 return rows
             else:
-                print("Could not connect to the database")
+                logger.error("Could not connect to the database")
                 return {"error": "Could not connect to the database"}
         except Exception as e:
-            print(f"Error during retrieving prices from db {str(e)}")
+            logger.exception(f"Error during retrieving prices from db")
             return {"error": str(e)}
 
     def get_limit_orders_by_status(self, status: int):
@@ -232,10 +235,10 @@ class MySQLAdapter:
                 conn.close()
                 return rows
             else:
-                print("Could not get db connection")
+                logger.error("Could not get db connection")
                 return {"error": "Could not get db connection"}
         except Exception as e:
-            print(f"Error during retrieving limit orders by type : {str(e)}")
+            logger.exception(f"Error during retrieving limit orders by type: ")
             return {"error": str(e)}
 
     def update_status(self, order_id, status):
@@ -255,7 +258,7 @@ class MySQLAdapter:
             else:
                 return {"error": "Could not connect to DB"}
         except Exception as e:
-            print(f"Error updating order status {str(e)}")
+            logger.exception(f"Error updating order status")
             return {"error": str(e)}
 
     def get_settled_orders(self, user_id, symbol):
@@ -275,10 +278,11 @@ class MySQLAdapter:
                 result = cursor.fetchall()
                 return result
             else:
+                logger.exception("Failed to get db connection")
                 return {"error": "Failed to connect to the database"}
 
         except Exception as e:
-            print(f"Error during retrieving settled orders")
+            logger.exception("Error during retrieving settled orders")
             return {"error": str(e)}
 
     def insert_position_history(self, position, user_id):
@@ -332,7 +336,7 @@ class MySQLAdapter:
                 return {"error": "Failed to connect to the database"}
 
         except Exception as e:
-            print(str(e))
+            logger.exception("failed to insert position history")
             return {"error": str(e)}
 
     def close_position(self, retri_id, symbol):
@@ -354,7 +358,7 @@ class MySQLAdapter:
                 if not user_id:
                     print("could not find a user with the retri_id")
                     return {"error": "could not find a user with the retri_id"}
-                print("user_id: ", user_id)
+                logger.info(f"user_id: {user_id}")
 
                 # 1. Get the active position
                 find_sql = """
@@ -391,7 +395,7 @@ class MySQLAdapter:
                 # current_price = float(price_result["price"])
                 current_price = price_cache.get(symbol)
                 if current_price is None:
-                    print(f"could not find the value of {symbol}")
+                    logger.error(f"could not find the value of {symbol}")
                     raise RuntimeError(f"Could not find the value of {symbol}")
 
 

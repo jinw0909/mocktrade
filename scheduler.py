@@ -13,11 +13,7 @@ from services.trading import TradingService
 
 from utils.price_cache import prices as price_cache
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
-)
+logger = logging.getLogger('uvicorn')
 # CoinGecko simple price endpoint
 API_ENDPOINT = "https://api.coingecko.com/api/v3/simple/price"
 TZ = timezone("Asia/Seoul")
