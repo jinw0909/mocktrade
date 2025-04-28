@@ -24,7 +24,7 @@ def update_position_status_to_redis():
     try:
         cursor.execute("""
             SELECT ph.user_id,
-                   ph.id AS `pos_id`
+                   ph.id AS `pos_id`,
                    ph.symbol,
                    ph.entry_price,
                    ph.amount,
