@@ -24,6 +24,7 @@ def update_position_status_to_redis():
     try:
         cursor.execute("""
             SELECT ph.user_id,
+                   ph.id AS `pos_id`
                    ph.symbol,
                    ph.entry_price,
                    ph.amount,
@@ -41,6 +42,7 @@ def update_position_status_to_redis():
         for r in rows:
             uid = r["retri_id"]
             positions_by_user.setdefault(uid, []).append({
+                "pos_id": r['pos_id'],
                 "symbol": r["symbol"],
                 "entry_price": float(r["entry_price"]),
                 "amount": float(r["amount"]),

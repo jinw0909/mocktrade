@@ -76,11 +76,11 @@ app.include_router(websocket_routers.router, prefix='/ws')
 # app.include_router(que_chart.router, prefix='/que', tags=['Que Chart API'])
 # app.include_router(ticker.router, prefix='/ticker', tags=['Ticker API'])
 
-@app.on_event("startup")
-async def on_startup():
-    # spin up the price‐updater
-    print("starting job scheduler...")
-    start_scheduler()
+# @app.on_event("startup")
+# async def on_startup():
+#     # spin up the price‐updater
+#     print("starting job scheduler...")
+#     start_scheduler()
 
 
 @app.on_event("shutdown")

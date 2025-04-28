@@ -1,5 +1,7 @@
+import os.path
 import traceback
 import logging
+from pprint import pformat
 
 from fastapi import APIRouter
 from starlette.responses import JSONResponse
@@ -103,3 +105,70 @@ async def api_showPriceCache():
     except Exception:
         print("Error, couldn't show the price cache")
         return {"error": "Failed to show the price cache" }
+
+
+@router.get('/createSymbolCache', summary='create the symbol cache', tags=["SETTINGS API"])
+async def api_createSymbolCache():
+    mysql = MySQLAdapter()
+    conn = None
+    cursor = None
+    OUTPUT_PATH = os.path.join(
+        os.path.dirname(__file__),
+        '..', 'utils', 'symbols.py'
+    )
+    try:
+        conn = mysql._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT symbol, price, qty 
+              FROM mocktrade.symbol
+        """)
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        symbol_cache = {}
+        for symbol, price, qty in rows:
+            try:
+                pi = int(price)
+                qi = int(qty)
+            except (TypeError, ValueError):
+                logger.warning(f"Skipping invalid row: {(symbol, price, qty)}")
+                continue
+            symbol_cache[symbol] = {"price": pi, "qty": qi}
+
+        # prepare the Python file contents
+        header = '''\
+        # THIS FILE IS AUTO‐GENERATED — do not edit by hand!
+        from typing import Dict
+        
+        symbols: Dict[str, Dict[str, int]] = 
+        '''
+        body = pformat(symbol_cache, indent=2)
+        content = header + body + "\n"
+
+        # write it out
+        os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+        with open(OUTPUT_PATH, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        print(f"Wrote {len(symbol_cache)} symbols to {OUTPUT_PATH!r}")
+        return {
+            "success":       True,
+            "cached_symbols": len(symbol_cache),
+            "module_path":   OUTPUT_PATH
+        }
+
+    except Exception:
+        if conn:
+            conn.rollback()
+        logger.exception("Failed to create the symbols cache")
+        raise
+    finally:
+        if cursor:
+            try: cursor.close()
+            except: pass
+        if conn:
+            try: conn.close()
+            except: pass
