@@ -31,6 +31,17 @@ mysql = MySQLAdapter()
 trader = TradingService()
 
 
+def calculate_cross():
+
+    try:
+        mysql = MySQLAdapter()
+        count = mysql.calculate_cross_positions()
+        return {"success": f"total {count} rows of cross positions calculated"}
+    except Exception:
+        logger.exception("Error during calculating cross margin positions")
+
+
+
 def run_all_jobs():
     update_all_prices()
     liquidate_positions()
@@ -38,8 +49,7 @@ def run_all_jobs():
     settle_tpsl_orders()
     update_position_status_to_redis()
     calculate_upnl()
-
-
+    calculate_cross()
 
 def fetch_prices(symbols):
     rd = mysql._get_redis()

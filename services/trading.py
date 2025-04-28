@@ -4,8 +4,11 @@ from datetime import datetime, timedelta
 from pytz import timezone
 from utils.price_cache import prices as price_cache
 import logging
+from utils.symbols import symbols as SYMBOL_CFG
 
 logger = logging.getLogger(__name__)
+
+FEE_RATE = 0.0002  #0.02%
 
 class TradingService(MySQLAdapter):
 
@@ -34,6 +37,11 @@ class TradingService(MySQLAdapter):
         order_value = price * amount
         order_margin = order_value / leverage
 
+        #helper to round by symbol
+        prec = SYMBOL_CFG.get(symbol, {"price": 2, "qty": 3})
+        PRICE_DP = prec["price"]
+        QTY_DP = prec["qty"]
+
         # case 1. No current position -> create new
         if not current_position:
             logger.info("case 1, no current position")
@@ -46,8 +54,8 @@ class TradingService(MySQLAdapter):
             return {
                 "user_id": user_id,
                 "symbol": symbol,
-                "amount": amount,
-                "entry_price": price,
+                "amount": round(amount, QTY_DP),
+                "entry_price": round(price, PRICE_DP),
                 "size": order_value,
                 "margin": order_margin,
                 "leverage": leverage,
@@ -108,8 +116,8 @@ class TradingService(MySQLAdapter):
             return {
                 "user_id": user_id,
                 "symbol": symbol,
-                "amount": total_amount,
-                "entry_price": avg_entry_price,
+                "amount": round(total_amount, QTY_DP),
+                "entry_price": round(avg_entry_price, PRICE_DP),
                 "size": total_size,
                 # "pnl": current_pnl,
                 "pnl": 0,
@@ -129,7 +137,9 @@ class TradingService(MySQLAdapter):
             # Partial close — reduce position
             new_amount = current_amount - amount
             close_pnl = (price - current_entry_price) * amount if current_side == 'buy' else (
-                                                                                                     current_entry_price - price) * amount
+                                                                                             current_entry_price - price) * amount
+            fee = abs(close_pnl) * FEE_RATE
+            net_close = close_pnl - fee
             # new_pnl = current_pnl + close_pnl
             new_pnl = close_pnl
             new_margin = current_margin * (new_amount / current_amount)
@@ -147,20 +157,20 @@ class TradingService(MySQLAdapter):
             return {
                 "user_id": user_id,
                 "symbol": symbol,
-                "amount": new_amount,
+                "amount": round(new_amount, QTY_DP),
                 "entry_price": current_entry_price,
                 "size": new_size,
                 "margin": new_margin,
                 "leverage": current_size / current_margin if current_margin else leverage,
                 "side": current_side,
                 "margin_type": margin_type,
-                "pnl": new_pnl,
-                "close_pnl": close_pnl,
+                "pnl": round(net_close, PRICE_DP),
+                "close_pnl": round(net_close, PRICE_DP),
                 "status": 1,
-                "liq_price": liq_price,
+                "liq_price": round(liq_price, PRICE_DP),
                 "tp": current_tp,
                 "sl": current_sl,
-                "close_price": price
+                "close_price": round(price, PRICE_DP)
             }
 
         elif amount == current_amount:
@@ -169,7 +179,9 @@ class TradingService(MySQLAdapter):
             close_pnl = (price - current_entry_price) * amount if current_side == 'buy' else (
                                                                                                      current_entry_price - price) * amount
             # new_pnl = current_pnl + close_pnl
+            fee = abs(close_pnl) * FEE_RATE
             new_pnl = close_pnl
+            net_close = close_pnl - fee
 
             return {
                 "user_id": user_id,
@@ -181,14 +193,14 @@ class TradingService(MySQLAdapter):
                 "leverage": 0,
                 "side": current_side,
                 "margin_type": margin_type,
-                "pnl": new_pnl,
-                "close_pnl": close_pnl,
+                "pnl": round(net_close, PRICE_DP),
+                "close_pnl": round(net_close, PRICE_DP),
                 "status": 3,  # fully closed
                 "liq_price": None,
                 "tp": None,
                 "sl": None,
                 "close": True,
-                "close_price": price
+                "close_price": round(price, PRICE_DP)
             }
 
         else:
@@ -198,7 +210,9 @@ class TradingService(MySQLAdapter):
             close_pnl = (price - current_entry_price) * current_amount if current_side == 'buy' else (
                                                                                                              current_entry_price - price) * current_amount
             # new_pnl = close_pnl + current_pnl
+            fee = abs(close_pnl) * FEE_RATE
             new_pnl = close_pnl
+            net_close = close_pnl - fee
             new_value = price * flip_amount
             new_margin = new_value / leverage
 
@@ -208,18 +222,18 @@ class TradingService(MySQLAdapter):
             return {
                 "user_id": user_id,
                 "symbol": symbol,
-                "amount": flip_amount,
-                "entry_price": price,
+                "amount": round(flip_amount, QTY_DP),
+                "entry_price": round(price, PRICE_DP),
                 "size": new_value,
                 "margin": new_margin,
                 "leverage": leverage,
                 "side": side,  # now flipped
                 "margin_type": margin_type,
-                "pnl": new_pnl,
-                "close_pnl": close_pnl,
+                "pnl": round(price, PRICE_DP),
+                "close_pnl": round(net_close, PRICE_DP),
                 "status": 1,
                 "opposite": True,
-                "liq_price": liq_price,
+                "liq_price": round(liq_price, PRICE_DP),
                 "tp": None,
                 "sl": None,
                 "close": True,

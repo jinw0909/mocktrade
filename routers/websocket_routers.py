@@ -15,7 +15,7 @@ price_redis    = aioredis.from_url("redis://172.31.11.200:6379/0", decode_respon
 
 
 @router.websocket("/{user_id}")
-async def pnl_stream(websocket: WebSocket, user_id: int):
+async def pnl_stream(websocket: WebSocket, user_id: str):
     await websocket.accept()
     logger.info(f"User {user_id} connected to PnL stream")
     try:

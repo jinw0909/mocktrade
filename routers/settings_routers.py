@@ -121,15 +121,20 @@ async def api_createSymbolCache():
         cursor = conn.cursor()
 
         cursor.execute("""
-            SELECT symbol, price, qty 
+            SELECT `symbol`, `price`, `qty` 
               FROM mocktrade.symbol
         """)
         rows = cursor.fetchall()
         cursor.close()
         conn.close()
 
+        logger.info(f"the symbol table: {rows}")
+
         symbol_cache = {}
-        for symbol, price, qty in rows:
+        for row in rows:
+            symbol = row['symbol']
+            price = row['price']
+            qty = row['qty']
             try:
                 pi = int(price)
                 qi = int(qty)
@@ -140,11 +145,11 @@ async def api_createSymbolCache():
 
         # prepare the Python file contents
         header = '''\
-        # THIS FILE IS AUTO‐GENERATED — do not edit by hand!
-        from typing import Dict
-        
-        symbols: Dict[str, Dict[str, int]] = 
-        '''
+# THIS FILE IS AUTO‐GENERATED — do not edit by hand!
+from typing import Dict
+
+symbols: Dict[str, Dict[str, int]] = 
+'''
         body = pformat(symbol_cache, indent=2)
         content = header + body + "\n"
 

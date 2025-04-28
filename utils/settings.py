@@ -805,3 +805,38 @@ class MySQLAdapter:
                 cursor.close()
             if conn:
                 conn.close()
+
+    def calculate_cross_positions(self):
+        conn = None
+        cursor = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM mocktrade.position_history
+                WHERE margin_type = 'cross'
+                AND status = 1
+            """)
+            active_cross_positions = cursor.fetchall()
+
+            cursor.execute("""
+                SELECT * 
+            """)
+            for pos in active_cross_positions:
+                # group by user_id
+                # group by
+                print('hi')
+
+
+        except Exception:
+            logger.exception("Failed to calculate cross_positions")
+            if conn:
+                conn.rollback()
+        finally:
+            if cursor:
+                try: cursor.close()
+                except: pass
+            if conn:
+                try: conn.close()
+                except: pass
+
