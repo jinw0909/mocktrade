@@ -40,6 +40,7 @@ async def pnl_stream(websocket: WebSocket, user_id: int):
                 entry_price = info["entry_price"]
                 amount      = info["amount"]
                 side        = info["side"]
+                pos_id      = info["pos_id"]
 
                 pnl = (
                     (current_price - entry_price) * amount
@@ -48,6 +49,7 @@ async def pnl_stream(websocket: WebSocket, user_id: int):
                 )
 
                 updates.append({
+                    "pos_id": pos_id,
                     "symbol": sym,
                     "current_price": current_price,
                     "pnl": pnl
