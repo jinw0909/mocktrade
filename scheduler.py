@@ -197,6 +197,7 @@ scheduler = AsyncIOScheduler(timezone=TZ)
 scheduler.add_job(
     run_all_jobs,
     trigger=IntervalTrigger(minutes=1),
+    next_run_time=datetime.now(),
     id="orchestrator",
     replace_existing=True
 )
