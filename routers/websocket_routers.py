@@ -35,12 +35,17 @@ async def pnl_stream(websocket: WebSocket, user_id: int):
             for sym, raw in zip(symbols, raw_prices):
                 if raw is None:
                     continue
+                try:
+                    info        = json.loads(positions[sym])
+                    pos_id      = info["pos_id"]
+                    entry_price = info["entry_price"]
+                    amount      = info["amount"]
+                    side        = info["side"]
+                except KeyError as e:
+                    logger.warning(f"User {user_id} — missing key {e.args[0]} for symbol {sym}, skipping")
+                    continue
+
                 current_price = float(raw)
-                info = json.loads(positions[sym])
-                entry_price = info["entry_price"]
-                amount      = info["amount"]
-                side        = info["side"]
-                pos_id      = info["pos_id"]
 
                 pnl = (
                     (current_price - entry_price) * amount
