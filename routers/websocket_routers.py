@@ -53,11 +53,19 @@ async def pnl_stream(websocket: WebSocket, user_id: int):
                     else (entry_price - current_price) * amount
                 )
 
+                # Compute percentage: pnl / (entry_price * amount) * 100
+                initial_notional = entry_price * amount
+                if initial_notional:
+                    pnl_pct = pnl / initial_notional * 100
+                else:
+                    pnl_pct = 0.0
+
                 updates.append({
                     "pos_id": pos_id,
                     "symbol": sym,
                     "current_price": current_price,
-                    "pnl": pnl
+                    "pnl": pnl,
+                    "pnl_pct": pnl_pct
                 })
 
             if updates:
