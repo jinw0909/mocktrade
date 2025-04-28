@@ -33,7 +33,6 @@ def update_position_status_to_redis():
               JOIN `mocktrade`.`user` AS u
                 ON ph.user_id = u.id 
              WHERE ph.status = 1
-             LIMIT 1
         """)
         rows = cursor.fetchall()
 
