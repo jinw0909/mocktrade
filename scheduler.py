@@ -49,7 +49,7 @@ def run_all_jobs():
     settle_tpsl_orders()
     update_position_status_to_redis()
     calculate_upnl()
-    calculate_cross()
+    # calculate_cross()
 
 def fetch_prices(symbols):
     rd = mysql._get_redis()
