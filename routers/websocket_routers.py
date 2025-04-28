@@ -54,7 +54,11 @@ async def pnl_stream(websocket: WebSocket, user_id: int):
                 })
 
             if updates:
-                await websocket.send_json({"data": updates})
+                total_pnl = sum(item["pnl"] for item in updates)
+                await websocket.send_json({
+                    "data": updates,
+                    "total": total_pnl
+                })
 
             await asyncio.sleep(1.0)
 

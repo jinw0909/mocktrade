@@ -23,20 +23,24 @@ def update_position_status_to_redis():
     cursor = conn.cursor()
     try:
         cursor.execute("""
-            SELECT user_id,
-                   symbol,
-                   entry_price,
-                   amount,
-                   side
-              FROM mocktrade.position_history
+            SELECT ph.user_id,
+                   ph.symbol,
+                   ph.entry_price,
+                   ph.amount,
+                   ph.side,
+                   u.retri_id
+              FROM `mocktrade`.`position_history` as ph
+              JOIN `mocktrade`.`user` AS u
+                ON ph.user_id = u.id 
              WHERE status = 1
+             LIMIT 1
         """)
         rows = cursor.fetchall()
 
         # Group by user_id
         positions_by_user = {}
         for r in rows:
-            uid = r["user_id"]
+            uid = r["retri_id"]
             positions_by_user.setdefault(uid, []).append({
                 "symbol": r["symbol"],
                 "entry_price": float(r["entry_price"]),
