@@ -475,6 +475,18 @@ class TradingService(MySQLAdapter):
                 current_price = price_dict.get(symbol)
                 if current_price is None:
                     continue
+
+                raw_price = price_dict.get(symbol)
+                if raw_price is None:
+                    continue
+
+                # pull per-symbol decimal places
+                prec = SYMBOL_CFG.get(symbol, {"price": 2, "qty": 3})
+                PRICE_DP = prec['price']
+                QTY_DP = prec['qty']
+
+                # quantize market price
+                current_price = round(raw_price, PRICE_DP)
                 logger.info(f"current price: {current_price}")
 
                 cursor.execute("""
@@ -505,7 +517,7 @@ class TradingService(MySQLAdapter):
                 logger.info(f'pos_id: {pos["id"]}')
 
                 # skip if the position is already closed or liquidated
-                if pos_status == 3 or pos_status == 4:
+                if pos_status in (3, 4):
                     # close all open tp/sl orders for the symbol and continue
                     cursor.execute("""
                         UPDATE mocktrade.order_history
@@ -515,7 +527,7 @@ class TradingService(MySQLAdapter):
                            AND `symbol` = %s
                            AND `id` = %s
                     """, (user_id, symbol, pos_id))
-                    logger.info("Position is closed")
+                    logger.info("Position is closed; cancelling TP/SL")
                     continue
 
                 elif pos_status == 1:
@@ -538,10 +550,10 @@ class TradingService(MySQLAdapter):
                     if not triggered:
                         continue
 
-                    # override with actual fill values
+                    # --- 2.4) Determine how much to close
                     or_id = o.get('or_id')
                     po_id = o.get('po_id')
-                    order_amt = float(o['amount'])
+                    order_amt = round(float(o['amount']), QTY_DP)
                     pos_amt = float(pos['amount'])
 
                     if or_id is None and po_id is not None:
@@ -551,16 +563,22 @@ class TradingService(MySQLAdapter):
                     # close_amt = min(order_amt, pos_amt)
 
                     exec_price = current_price
-                    exec_amount = close_amt
-                    lev = float(pos['leverage'])
+                    exec_amount = round(close_amt, QTY_DP)
+                    leverage = float(pos['leverage'])
+                    entry_price = float(pos['entry_price'])
+                    current_margin = float(pos['margin'])
 
-                    pos_margin = float(pos['margin'])
+                    # --2.5) Calculate commissions & realize PnL
+                    notional = exec_price * exec_amount
+                    commission = notional * FEE_RATE
 
+                    # 2c) realized PnL based *only* on the position side
+                    if pos_side == 'buy':
+                        gross_pnl = (exec_price - entry_price) * exec_amount
+                    else:
+                        gross_pnl = (entry_price - exec_price) * exec_amount
+                    closed_pnl = gross_pnl - commission
                     # exec_margin = (exec_price * exec_amount) / lev
-
-                    # update in-memory so calculate/DB uses real values
-                    o['price'] = exec_price
-                    # o['margin'] = exec_margin
 
                     # persist execution values back to order_history
                     cursor.execute("""
@@ -573,17 +591,13 @@ class TradingService(MySQLAdapter):
                           order_id
                           ))
 
-                    entry_price = float(pos['entry_price'])
-                    current_margin = float(pos['margin'])
-                    old_pnl = float(pos['pnl'])
-                    lev = float(pos['leverage'])
-                    # side_of_pos = pos['side']  # reloaded for clarity
+                    # entry_price = float(pos['entry_price'])
+                    # current_margin = float(pos['margin'])
+                    # old_pnl = float(pos['pnl'])
+                    # lev = float(pos['leverage'])
+                    # # side_of_pos = pos['side']  # reloaded for clarity
 
-                    # 2c) realized PnL based *only* on the position side
-                    if pos_side == 'buy':
-                        closed_pnl = (current_price - entry_price) * close_amt
-                    else:
-                        closed_pnl = (entry_price - current_price) * close_amt
+
 
                     # forced-liquidation guard
                     # if this loss would wipe out all margin, liquidate instead of partial/full close
@@ -615,7 +629,7 @@ class TradingService(MySQLAdapter):
                             closed_pnl,  # full margin loss
                             pos['margin_type'],
                             pos_side,
-                            lev,
+                            leverage,
                             3,  # liquidated status
                             datetime.now(timezone("Asia/Seoul")),
                             exec_price
@@ -649,12 +663,12 @@ class TradingService(MySQLAdapter):
                     # 2d) compute new position values
                     new_amt = pos_amt - close_amt
                     # new_pnl = old_pnl + closed_pnl
-                    new_pnl = closed_pnl
+                    # new_pnl = closed_pnl
                     new_size = new_amt * entry_price
-                    new_margin = new_size / lev if new_amt > 0 else 0.0
+                    new_margin = new_size / leverage if new_amt > 0 else 0.0
                     if new_amt > 0:
                         new_liq = self.calc_iso_liq_price(
-                            entry_price, lev, pos_side
+                            entry_price, leverage, pos_side
                         )
                         new_status = 1
                     else:
@@ -680,15 +694,15 @@ class TradingService(MySQLAdapter):
                     """, (
                         user_id,
                         symbol,
-                        new_size,
-                        new_amt,
+                        round(new_size, PRICE_DP),
+                        round(new_amt, QTY_DP),
                         entry_price,
                         new_liq,
-                        new_margin,
-                        new_pnl,
+                        round(new_margin, PRICE_DP),
+                        round(closed_pnl, PRICE_DP),
                         pos['margin_type'],
                         pos_side,
-                        lev,
+                        leverage,
                         new_status,
                         datetime.now(timezone('Asia/Seoul')),
                         exec_price
