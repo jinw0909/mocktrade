@@ -2,7 +2,7 @@ from utils.settings import MySQLAdapter
 import traceback
 from datetime import datetime, timedelta
 from pytz import timezone
-from utils.price_cache import prices as price_cache
+from utils.fixed_price_cache import prices as price_cache
 import logging
 from utils.symbols import symbols as SYMBOL_CFG
 
