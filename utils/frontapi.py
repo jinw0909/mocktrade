@@ -168,7 +168,7 @@ class MySQLAdapter:
                 with conn.cursor() as cursor:
                     
                     # sql = f"SELECT * FROM  order_history ph WHERE user_id ={user_no} order by datetime desc;"
-                    sql = f"SELECT * FROM order_history WHERE user_id = {user_no} ORDER BY insert_time DESC;"
+                    sql = f"SELECT * FROM order_history WHERE user_id = {user_no} and status !=0 ORDER BY insert_time DESC;"
                 
                     cursor.execute(sql)
                     result=cursor.fetchall()
@@ -294,9 +294,7 @@ class MySQLAdapter:
      
         return True
     
-    
-    
-    def get_posioder(self,po_id):
+    def get_price(self,symbol):
         
         
         
@@ -308,33 +306,37 @@ class MySQLAdapter:
         try:
             if conn:
                 with conn.cursor() as cursor:
-                    
-                    sql = f"SELECT * FROM order_history WHERE po_id = {po_id} and status=1  ORDER BY insert_time DESC;"
-                    
+                 
+                  
+                    sql = f"SELECT * FROM symbol_vol WHERE symbol = '{symbol}' ;"
+                   
                 
                     cursor.execute(sql)
                     result=cursor.fetchall()
                     result=pd.DataFrame(result)
+                    print(result)
                     
-                    # print('-----------------',result)
                 if len(result)>0:
+                    for i in result.iterrows():
+                        new_dict={}
+                        df_data=i[1]
+                     
+                        new_dict={}
+                        new_dict['symbol']=df_data['symbol']
+                        new_dict['high']=str(df_data['high'])
+                        new_dict['low']=str(df_data['low'])
+                        new_dict['volume']=str(df_data['volume'])
+                        new_list.append(new_dict)
                     
-                    data=result
+                   
                     
-                    
-                    if len(result)>=2:
-                        
-                        data=result
-                        
-                    
-                    return data,True
-                
-                else:
-                
-                    return data,False
-              
                  
-         
+                    
+            self.return_dict_data=dict(results=new_list)
+            self.return_dict_data['reCode']=0
+            self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+            self.status_code=200   
+                    
                        
                
         except Exception as e:
@@ -342,7 +344,78 @@ class MySQLAdapter:
             pass 
         
      
+        return True
+    
+    # def get_posioder(self,po_id):
         
+        
+        
+    #     # self.return_dict_data=dict(page=0,size=0,totalPages=0,totalCount=0,results=[], reCode=1, message='Server Error')
+    #     conn = self._get_connection()
+    #     check = MakeErrorType()
+    #     new_list=[]
+       
+    #     try:
+    #         if conn:
+    #             with conn.cursor() as cursor:
+                    
+    #                 sql = f"SELECT * FROM order_history WHERE po_id = {po_id} and status=1  ORDER BY insert_time DESC;"
+                    
+                
+    #                 cursor.execute(sql)
+    #                 result=cursor.fetchall()
+    #                 result=pd.DataFrame(result)
+                    
+    #                 # print('-----------------',result)
+    #             if len(result)>0:
+                    
+    #                 data=result
+                    
+                    
+    #                 if len(result)>=2:
+                        
+    #                     data=result
+                        
+                    
+    #                 return data,True
+                
+    #             else:
+                
+    #                 return data,False
+              
+                 
+         
+                       
+               
+    #     except Exception as e:
+    #         print(e)
+    #         pass 
+        
+     
+    def get_posioder(self, po_id):
+        conn = self._get_connection()
+        check = MakeErrorType()
+        data = None  # ✅ 여기에 기본값 미리 선언
+        try:
+            if conn:
+                with conn.cursor() as cursor:
+                    sql = f"""
+                        SELECT * FROM order_history 
+                        WHERE po_id = {po_id} and status=1 
+                        ORDER BY insert_time DESC;
+                    """
+                    cursor.execute(sql)
+                    result = cursor.fetchall()
+                    result = pd.DataFrame(result)
+                    
+                    if len(result) > 0:
+                        data = result
+                        return data, True
+                    else:
+                        return data, False
+        except Exception as e:
+            print(e)
+            return None, False  # ✅ 예외 처리 시도에도 반환 추가   
     
     
     
@@ -373,11 +446,13 @@ class MySQLAdapter:
                     for i in result.iterrows():
                         new_dict={}
                         df_data=i[1]
-                        order,orty=self.get_posioder(df_data['id'])
-                        print('======================================',order,'**********************',orty)
+                        i1=0
                         
+                        order,orty=self.get_posioder(df_data['id'])
+                       
+                   
                         if  orty ==True:
-                     
+                            
                             print('order',order)
                             new_dict['user_no']=df_data['user_id']
                             new_dict['symbol']=df_data['symbol']
@@ -389,6 +464,7 @@ class MySQLAdapter:
                             new_dict['close_price']=str(order['price'].iloc[0])
                             new_dict['close_pnl']=str(df_data['pnl'])
                             new_dict['close_datetime']=str(df_data['datetime'])
+                            
                             # new_dict['amount']=str(df_data['amount'])
                             # # new_dict['side']=str(df_data['side'])
                             # new_dict['leverage']=str(df_data['leverage'])
@@ -396,7 +472,11 @@ class MySQLAdapter:
                             # new_dict['sl']=str(df_data['sl'])
                             # new_dict['datetime']=str(df_data['insert_time'])
                             new_list.append(new_dict)
-                    
+                        
+                        else:
+                            
+                            print('chck')
+                         
                    
                     
                  
@@ -794,6 +874,46 @@ class MySQLAdapter:
     
       
     
+    # def reset_user(self, user_no):
+    #     conn = self._get_connection()
+    #     check = MakeErrorType()
+    #     # 현재 시간을 datetime 객체로 가져오기
+    #     aaa=datetime.strftime(self.now,"%Y-%m-%d %H:%M:%S")
+    #     aaa1=datetime.strptime(aaa,"%Y-%m-%d %H:%M:%S")  # 문자열 형식으로 변환
+
+    #     try:
+    #         if conn:
+    #             user=self.get_resetuser_chck(user_no)
+    #             id=user['id'].iloc[0]
+    #             self.get_resetuser_update(id)
+    #             with conn.cursor() as cursor:
+    #                 # 쿼리에서 타이핑 오류 수정: usder_id -> user_id
+    #                 sql = """
+    #                 INSERT INTO user
+    #                 (retri_id,balance,datetime,status ) 
+    #                 VALUES (%s, %s, %s, %s )
+    #                 """
+    #                 # cursor.execute를 통해 인자 전달
+    #                 cursor.execute(sql, (user_no, 10000, aaa1,0))
+
+    #                 conn.commit()  # 트랜잭션 커밋
+                    
+                    
+                    
+                    
+    #                 self.return_dict_data['results']=[]
+    #                 self.return_dict_data['reCode']=0
+    #                 self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+
+    #     except Exception as e:
+    #         print("Database error:", e)
+
+    #     finally:
+    #         if conn:
+    #             conn.close()  # 항상 연결 종료
+                
+                
+                
     def reset_user(self, user_no):
         conn = self._get_connection()
         check = MakeErrorType()
@@ -805,16 +925,13 @@ class MySQLAdapter:
             if conn:
                 user=self.get_resetuser_chck(user_no)
                 id=user['id'].iloc[0]
-                self.get_resetuser_update(id)
+                # self.get_resetuser_update(id)
                 with conn.cursor() as cursor:
                     # 쿼리에서 타이핑 오류 수정: usder_id -> user_id
-                    sql = """
-                    INSERT INTO user
-                    (retri_id,balance,datetime,status ) 
-                    VALUES (%s, %s, %s, %s )
-                    """
+                    sql = """UPDATE user SET balance = %s WHERE id = %s """
+
                     # cursor.execute를 통해 인자 전달
-                    cursor.execute(sql, (user_no, 10000, aaa1,0))
+                    cursor.execute(sql, ( 10000,id))
 
                     conn.commit()  # 트랜잭션 커밋
                     
@@ -830,8 +947,7 @@ class MySQLAdapter:
 
         finally:
             if conn:
-                conn.close()  # 항상 연결 종료
-                
+                conn.close()  # 항상 연결 종료            
     
                 
                 

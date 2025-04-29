@@ -178,17 +178,11 @@ class UserSession:
                         if existing['session_id']:
                             self.data['results'] = { 
                                 'user_id': existing['user_id'],
-                                'session_id': existing['session_id'],
-                                'package': existing['total_package'],
-                                'end_date': existing['end_date'].strftime('%Y-%m-%d')
                             }
 
                         else:
                             self.data['results'] = { 
                                 'user_id': existing['user_id'],
-                                'session_id': existing['session_id'],
-                                'package': existing['total_package'],
-                                'end_date': existing['end_date'].strftime('%Y-%m-%d')
                             }
                             self.data['message'] = '중복 로그인이 감지되었습니다.'
                             self.status_code = 401
