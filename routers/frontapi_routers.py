@@ -264,6 +264,30 @@ async def api_select(user_no: str):
 
 
 
+@router.get('/get_price', summary='USER PRICE', tags=['USER API'])
+async def api_select(symbol: str):
+
+    
+    """
+
+    
+    """
+    mysql=MySQLAdapter()
+    # check = MakeErrorType()
+    try:  
+        
+        mysql.get_price(symbol)
+        
+
+    except Exception as e:
+        print(e)
+
+
+    return JSONResponse(mysql.return_dict_data, status_code=mysql.status_code)
+
+
+
+
 
 
 

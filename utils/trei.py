@@ -802,11 +802,10 @@ class MySQLAdapter:
     def buy_limit_order(self,user_no: int, symbol: str, margin_type: int, leverage: int,price : float, usdt=0, amount=0,tp=0,sl=0 ) :
         user = self.get_user(user_no)
         check = MakeErrorType()
-        # rd = self._get_redis()
-        new_price = price_cache.get(symbol)
-        # new_price = rd.get(f'price:{symbol}USDT')
 
-        conn = self._get_connection()
+        rd = self._get_redis()
+        price_ch,qty_ch=self.get_qty(symbol)
+        new_price = rd.get(f'price:{symbol}USDT')
 
         if new_price:  # price 값이 None이 아닌 경우에만 진행
             # new_price1 = float(new_price.decode())  # 바이트 문자열을 디코딩하여 float로 변환'
@@ -900,6 +899,8 @@ class MySQLAdapter:
                     if usdt > 0:  # usdt를 사용하는 경우
 
                         print('여기')
+                        susu=usdt*0.0002
+                        usdt=usdt-susu
                         new_usdt = usdt / leverage  # 새로운 USDT 계산
                         new_amount = usdt / price  # 새로운 금액 계산
                         print("new_amount",new_amount)
@@ -908,9 +909,12 @@ class MySQLAdapter:
                     elif amount > 0:  # amount를 사용하는 경우
 
                         print('여기1')
-                        new_usdt = (amount * price) / leverage  # 새로운 USDT 계산
-                        new_amount = amount  # 금액은 그대로 사용
                         usdt=(amount * price)
+                        susu=usdt*0.0002
+                        usdt=usdt-susu
+                        new_usdt = ((amount * price) / leverage )-susu # 새로운 USDT 계산
+                        new_amount = amount  # 금액은 그대로 사용
+                       
                         print("new_amount",new_amount)
                         print("new_usdt",new_usdt,usdt)
                         print('usdt',usdt)
@@ -971,19 +975,18 @@ class MySQLAdapter:
         # return return_data
 
 
-    def sell_limit_order(self, user_no: int, symbol: str, margin_type: int, leverage: int,price : float, usdt=0, amount=0,tp=0,sl=0)  :
+    async def sell_limit_order(self, user_no: int, symbol: str, margin_type: int, leverage: int,price : float, usdt=0, amount=0,tp=0,sl=0)  :
         user = self.get_user(user_no)
         check = MakeErrorType()
-        # rd = self._get_redis()
+        rd = self._get_redis()
         # margin_type을 'isolated' 또는 'cross'로 설정
 
-        # new_price = rd.get(f'price:{symbol}USDT')
-        new_price = price_cache.get(symbol)
-        conn = self._get_connection()
+        new_price = await rd.get(f'price:{symbol}USDT')
+        price_ch,qty_ch=self.get_qty(symbol)         
 
         if new_price:  # price 값이 None이 아닌 경우에만 진행
-            # new_price1 = float(new_price.decode())  # 바이트 문자열을 디코딩하여 float로 변환'
-            new_price1 = float(new_price)
+            new_price1 = float(new_price.decode())  # 바이트 문자열을 디코딩하여 float로 변환'
+            # new_price1 = float(new_price)
 
         margin_type1=margin_type
         usdt1=usdt
@@ -1041,6 +1044,8 @@ class MySQLAdapter:
                     if usdt > 0:  # usdt를 사용하는 경우
 
                         print('여기')
+                        susu=usdt*0.0002
+                        usdt=usdt-susu
                         new_usdt = usdt / leverage  # 새로운 USDT 계산
                         new_amount = usdt / price  # 새로운 금액 계산
                         print("new_amount",new_amount)
@@ -1049,9 +1054,12 @@ class MySQLAdapter:
                     elif amount > 0:  # amount를 사용하는 경우
 
                         print('여기1')
-                        new_usdt = (amount * price) / leverage  # 새로운 USDT 계산
-                        new_amount = amount  # 금액은 그대로 사용
                         usdt=(amount * price)
+                        susu=usdt*0.0002
+                        usdt=usdt-susu
+                        new_usdt = ((amount * price) / leverage) -susu # 새로운 USDT 계산
+                        new_amount = amount  # 금액은 그대로 사용
+                        
                         print("new_amount",new_amount)
                         print("new_usdt",new_usdt,usdt)
                         print('usdt',usdt)
@@ -1218,6 +1226,8 @@ class MySQLAdapter:
                     if usdt > 0:  # usdt를 사용하는 경우
 
                         print('여기')
+                        susu=usdt*0.0004
+                        usdt=usdt-susu
                         new_usdt = usdt / leverage  # 새로운 USDT 계산
                         new_amount = usdt / price  # 새로운 금액 계산
                         print("new_amount",new_amount)
@@ -1226,9 +1236,12 @@ class MySQLAdapter:
                     elif amount > 0:  # amount를 사용하는 경우
 
                         print('여기1')
-                        new_usdt = (amount * price) / leverage  # 새로운 USDT 계산
-                        new_amount = amount  # 금액은 그대로 사용
                         usdt=(amount * price)
+                        susu=usdt*0.0004
+                        usdt=usdt-susu
+                        new_usdt = (amount * price) / leverage -susu # 새로운 USDT 계산
+                        new_amount = amount  # 금액은 그대로 사용
+                        
                         print("new_amount",new_amount)
                         print("new_usdt",new_usdt,usdt)
                         print('usdt',usdt)
@@ -1455,7 +1468,7 @@ class MySQLAdapter:
                                             print(usdt, balance)
 
                                             liq_price = self.floor_to_n_decimal(new_price * (1 - adjusted_balance / new_size),price_ch) 
-                                        self.cancel_position(user_no,id)
+                                        self.cancel_position(user_no,id,new_usdt)
                                         self.inser_position_history(user_no,symbol,abs(self.floor_to_n_decimal(new_size,price_ch)),abs(self.floor_to_n_decimal(quantity,qty_ch)),float(price),float(liq_price),0,abs(new_margin),0,margin_type,'buy',leverage,1,0,0,0)
                                         
                                         position,po=self.get_position_return(user_no,symbol)
@@ -1474,9 +1487,9 @@ class MySQLAdapter:
                                         
 
                                         # self.update_positon(id)
-                                    elif  quantity==0 or (quantity<0.1 and quantity>0 ):
+                                    elif  quantity==0 :
                                         print('amount22222222222222222222222222222222')
-                                        self.cancel_position(user_no,id)
+                                        self.cancel_position(user_no,id,new_usdt)
                                     else:
                                         print('amount33333333333333333333333333333333333333333333333')
                                         if margin_type=='isolated':
@@ -1532,7 +1545,7 @@ class MySQLAdapter:
                                             print(usdt, balance)
 
                                             liq_price =self.floor_to_n_decimal( new_price * (1 - adjusted_balance / new_size) ,price_ch)
-                                        self.cancel_position(user_no,id)
+                                        self.cancel_position(user_no,id,new_usdt)
                                         self.inser_position_history(user_no,symbol,abs(self.floor_to_n_decimal(new_size,price_ch)),abs(self.floor_to_n_decimal(quantity,qty_ch)),float(price),float(liq_price),0,abs(new_margin),0,margin_type,'buy',leverage,1,0,0,0)
                                         
                                         position,po=self.get_position_return(user_no,symbol)
@@ -1548,9 +1561,9 @@ class MySQLAdapter:
                                             print('sl주분')
                                             self.inser_oder_history(user_no, symbol, 'sl', margin_type, 'sell', price, new_usdt ,self.floor_to_n_decimal(new_amount,qty_ch), leverage, 0,price,tp,sl,id)
                                         # self.update_positon(id)
-                                    elif  new_margin==0 or (new_margin<0.1 and new_margin>0 ):
+                                    elif  new_margin==0 :
                                         print('22222222222222222222222222222222')
-                                        self.cancel_position(user_no,id)
+                                        self.cancel_position(user_no,id,new_usdt)
                                     else:
                                         print('33333333333333333333333333333333333333333333333')
                                         if margin_type=='isolated':
@@ -1700,6 +1713,8 @@ class MySQLAdapter:
                     if usdt > 0:  # usdt를 사용하는 경우
 
                         print('여기')
+                        susu=usdt*0.0004
+                        usdt=usdt-susu
                         new_usdt = usdt / leverage  # 새로운 USDT 계산
                         new_amount = usdt / price  # 새로운 금액 계산
                         print("new_amount",new_amount)
@@ -1708,9 +1723,12 @@ class MySQLAdapter:
                     elif amount > 0:  # amount를 사용하는 경우
 
                         print('여기1')
+                        usdt=(amount * price)
+                        susu=usdt*0.0004
+                        usdt=usdt-susu
                         new_usdt = (amount * price) / leverage  # 새로운 USDT 계산
                         new_amount = amount  # 금액은 그대로 사용
-                        usdt=(amount * price)
+                        
                         print("new_amount",new_amount)
                         print("new_usdt",new_usdt,usdt)
                         print('usdt',usdt)
@@ -1938,7 +1956,7 @@ class MySQLAdapter:
                                             print(usdt, balance,new_price)
 
                                             liq_price = self.floor_to_n_decimal(new_price * (1 + adjusted_balance / new_size) ,price_ch)
-                                        self.cancel_position(user_no,id)
+                                        self.cancel_position(user_no,id,new_usdt)
                                         self.inser_position_history(user_no,symbol,abs(self.floor_to_n_decimal(new_size,price_ch)),abs(self.floor_to_n_decimal(quantity,qty_ch)),float(price),float(liq_price),0,abs(new_margin),0,margin_type,'sell',leverage,1,0,0,0)
                                         
                                         position,po=self.get_position_return(user_no,symbol)
@@ -1955,11 +1973,12 @@ class MySQLAdapter:
                                             self.inser_oder_history(user_no, symbol, 'sl', margin_type, 'buy', price, new_usdt ,self.floor_to_n_decimal(new_amount,qty_ch), leverage, 0,price,tp,sl,id)
                                         # self.update_positon(id)
 
-                                    elif  quantity ==0.0 or (quantity < 0.1 and quantity >0):
+                                    elif  quantity ==0.0 :
                                         
 
                                         print('amount22222222222222222222222222222222')
-                                        self.cancel_position(user_no,id)
+
+                                        self.cancel_position(user_no,id,new_usdt)
 
                                     else:
                                         print('amount3333333333333333333333333333333')
@@ -2016,7 +2035,7 @@ class MySQLAdapter:
                                             print(usdt, balance,new_price)
 
                                             liq_price = self.floor_to_n_decimal(new_price * (1 + adjusted_balance / new_size) ,price_ch)
-                                        self.cancel_position(user_no,id)
+                                        self.cancel_position(user_no,id,new_usdt)
                                         self.inser_position_history(user_no,symbol,abs(self.floor_to_n_decimal(new_size,price_ch)),abs(self.floor_to_n_decimal(quantity,qty_ch)),float(price),float(liq_price),0,abs(new_margin),0,margin_type,'sell',leverage,1,0,0,0)
                                         
                                         position,po=self.get_position_return(user_no,symbol)
@@ -2033,10 +2052,11 @@ class MySQLAdapter:
                                             self.inser_oder_history(user_no, symbol, 'sl', margin_type, 'buy', price, new_usdt ,self.floor_to_n_decimal(new_amount,qty_ch), leverage, 0,price,tp,sl,id)
                                                     # self.update_positon(id)
 
-                                    elif  new_margin ==0.0 or (new_margin < 0.1 and new_margin >0):
+                                    elif  new_margin ==0.0 :
+                                        
 
                                         print('22222222222222222222222222222222')
-                                        self.cancel_position(user_no,id)
+                                        self.cancel_position(user_no,id,new_usdt)
                                     else:
                                         print('3333333333333333333333333333333')
                                         if margin_type=='isolated':
@@ -2429,7 +2449,8 @@ class MySQLAdapter:
             
             
             
-    def cancel_position(self, user_no, position_id: int,close_price=0) :
+
+    def cancel_position(self, user_no, position_id: int,usdt:float=0,close_price=0) :
 
         conn = self._get_connection()
         return_data = dict()
@@ -2459,7 +2480,11 @@ class MySQLAdapter:
                         price = rd.get(f'price:{symbol}USDT')
                         price = float(price.decode())
                         entry_price= result['entry_price'].iloc[0]
-                        new_usdt=result['margin'].iloc[0]
+                        if usdt ==0:
+                            
+                            new_usdt=result['margin'].iloc[0]
+                        else:
+                            new_usdt=usdt
                         new_amount=result['amount'].iloc[0]
                         margin_type=result['margin_type'].iloc[0]
                         leverage=result['leverage'].iloc[0]
@@ -2602,15 +2627,15 @@ class MySQLAdapter:
         conn = self._get_connection()
         check = MakeErrorType()
         new_list=[]
-       
+        result=None
         try:
             if conn:
                 with conn.cursor() as cursor:
                     
                     if type == 'tp':
-                        sql = f"SELECT * FROM order_history where status=0 and user_id={user_no} and symbol ='{symbol}' and type ='tp' and order_price = 0 ;"
+                        sql = f"SELECT * FROM order_history where (status=0 or status=3) and user_id={user_no} and symbol ='{symbol}' and type ='tp' and order_price = 0 ;"
                     elif type =='sl':
-                        sql = f"SELECT * FROM order_history where status=0 and user_id={user_no} and symbol ='{symbol}' and type ='sl' and order_price = 0 ;"
+                        sql = f"SELECT * FROM order_history where (status=0 or status=3) and user_id={user_no} and symbol ='{symbol}' and type ='sl' and order_price = 0 ;"
                         
                     
                     cursor.execute(sql)
@@ -2659,6 +2684,37 @@ class MySQLAdapter:
         except Exception as e:
             print(e)
             pass
+        
+    
+    
+    def update_order_tp_sl_status(self,status,id):
+        # return_num = 0
+        conn = self._get_connection()
+        # aaa=datetime.strftime(self.now,"%Y-%m-%d %H:%M:%S")
+        
+        # new_aaa=datetime.strftime((self.now-timedelta(hours=4)),"%Y%m%d%H")
+        
+        try:
+            if conn:
+                with conn.cursor() as cursor:
+                   
+                    sql = """UPDATE order_history SET   status= %s  where id=%s ;"""
+                    
+                        
+                    # 파라미터를 튜플로 전달 (symbol을 마지막으로 전달)
+                    values = (status,id)
+
+                    # 쿼리 실행
+                    cursor.execute(sql, values)
+
+                    # 커밋 후 커넥션 종료
+                    conn.commit()
+                
+                # 커넥션 종료는 with 블록 밖에서
+                conn.close()   
+        except Exception as e:
+            print(e)
+            pass
     
     
 
@@ -2686,6 +2742,7 @@ class MySQLAdapter:
             
             update_or_tp,update_ch_tp=self.get_tp_sl_return(user_no,symbol,'tp')
             update_or_sl,update_ch_sl=self.get_tp_sl_return(user_no,symbol,'sl')
+            
             print( 'update_or_tp',update_or_tp , update_ch_tp)
             print('update_or_sl',update_or_sl,update_ch_sl )
             def insert_order_and_update(field_name, value, label,side,new_type,new):
@@ -2741,16 +2798,26 @@ class MySQLAdapter:
                 insert_order_and_update('tp', tp, 'tp',side,1,1)
             else:
                 id=update_or_tp['id'].iloc[0]
-                self.update_order_tp_sl_position(tp,id,'tp')
-                insert_order_and_update('tp', tp, 'tp',side,0,2)
+                
+                if tp !=0:
+                    self.update_order_tp_sl_status(0,id)
+                    self.update_order_tp_sl_position(tp,id,'tp')
+                    insert_order_and_update('tp', tp, 'tp',side,0,2)
+                else:
+                    self.update_order_tp_sl_status(3,id)
+                    insert_order_and_update('tp', tp, 'tp',side,0,2)
             if update_ch_sl== False:
                 insert_order_and_update('sl', sl, 'sl',side,1,1)
             else:
                 id=update_or_sl['id'].iloc[0]
-                self.update_order_tp_sl_position(sl,id,'sl')
-                insert_order_and_update('sl', sl, 'sl',side,0,2)
                 
-                
+                if sl !=0:
+                    self.update_order_tp_sl_status(0,id)
+                    self.update_order_tp_sl_position(sl,id,'sl')
+                    insert_order_and_update('sl', sl, 'sl',side,0,2)
+                else:
+                    self.update_order_tp_sl_status(3,id)
+                    insert_order_and_update('sl', sl, 'sl',side,0,2)
             
 
             self.return_dict_data['results']=[]

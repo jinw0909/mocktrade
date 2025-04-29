@@ -1,4 +1,4 @@
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, Header, Request
 from logging.handlers import RotatingFileHandler 
 from fastapi.responses import RedirectResponse
 from fastapi.responses import JSONResponse, Response
@@ -43,7 +43,6 @@ async def save_user(data: SessionRequest):
     
     try:    
         user_info = mysql.save_user(data.session_id, data.user_id, data.total_package, data.end_date)
-
         logger.info(f"user_info: {user_info}")
        
         response = JSONResponse(
@@ -114,14 +113,16 @@ class ChkRequest(BaseModel):
     user_id: str
 
 @router.post('/user-info', summary='SESSION', tags=['SESSION API'])
-async def user_info(data: ChkRequest):
+async def user_info(request: Request):
     """
     모의 트레이딩 페이지 최초 접속시 유저 정보 주는 api
     """
     mysql=UserSession()
     
     try:    
-        user_info = await mysql.get_user_info(data.user_id)
+        user_id = request.cookies.get('user_id')
+        logger.info(f"user_id: {user_id}")       
+        user_info = await mysql.get_user_info(user_id)
             
     except Exception as e:
         logger.error(f"Error get user info router: {e}")       
