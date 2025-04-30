@@ -22,6 +22,7 @@ def update_position_status_to_redis():
     conn = mysql._get_connection()
     cursor = conn.cursor()
     try:
+        # 1) load all active positions
         cursor.execute("""
             SELECT ph.user_id,
                    ph.id AS `pos_id`,
@@ -37,7 +38,7 @@ def update_position_status_to_redis():
         """)
         rows = cursor.fetchall()
 
-        # Group by user_id
+        # 2) Group by retri_id
         positions_by_user = {}
         for r in rows:
             uid = r["retri_id"]
@@ -49,7 +50,7 @@ def update_position_status_to_redis():
                 "side": r["side"],
             })
 
-        # Write into Redis: one hash per user
+        # 3) overwrite each active user's Redis hash
         for uid, pos_list in positions_by_user.items():
             key = f"positions:{uid}"
             # Start by deleting old data for this user
@@ -58,6 +59,16 @@ def update_position_status_to_redis():
             mapping = { p["symbol"]: json.dumps(p) for p in pos_list }
             if mapping:
                 redis_client.hset(key, mapping=mapping)
+
+        # 4) remove any leftover "positions:{uid}" keys for users who no longer have active positions
+        for key in redis_client.scan_iter("positions:*"):
+            # extract uid portion
+            try:
+                _, uid = key.split(":", 1)
+            except ValueError:
+                continue
+            if uid not in positions_by_user:
+                redis_client.delete(key)
 
         logger.info(f"Updated positions for {len(positions_by_user)} users at {datetime.now(timezone('Asia/Seoul'))}")
 

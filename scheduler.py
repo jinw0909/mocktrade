@@ -13,6 +13,7 @@ from services.trading import TradingService
 from utils.local_redis import update_position_status_to_redis
 
 from utils.price_cache import prices as price_cache
+from utils.fixed_price_cache import prices as fixed_prices
 
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ def calculate_cross():
 
     try:
         mysql = MySQLAdapter()
-        count = mysql.calculate_cross_positions()
+        count = mysql.liquidate_cross_positions()
         return {"success": f"total {count} rows of cross positions calculated"}
     except Exception:
         logger.exception("Error during calculating cross margin positions")
@@ -112,18 +113,19 @@ def fetch_prices_from_redis(symbols):
 
 
 def update_all_prices():
-    mysql = MySQLAdapter()
-    conn = mysql._get_connection()
-    cursor = conn.cursor()
+    # mysql = MySQLAdapter()
+    # conn = mysql._get_connection()
+    # cursor = conn.cursor()
 
     try:
         # 1) load symbols from your table
-        cursor.execute("SELECT symbol FROM mocktrade.prices")
-        symbols = [row["symbol"] for row in cursor.fetchall()]
+        # cursor.execute("SELECT symbol FROM mocktrade.prices")
+        # symbols = [row["symbol"] for row in cursor.fetchall()]
+        symbols = list(fixed_prices.keys())
 
         if not symbols:
             # print(f"[{datetime.now(TZ)}] no symbols found to update")
-            logger.info(f"[{datetime.now(TZ)}] no symbols found to update")
+            logger.info(f"[{datetime.now(TZ)}] no symbols found in fixed_price_cache")
             return
 
         # 2) fetch in one go
@@ -151,14 +153,14 @@ def update_all_prices():
         logger.info(f"updated {len(new_prices)} number of prices from redis")
 
     except Exception as e:
-        conn.rollback()
+        # conn.rollback()
         # traceback.print_exc()
         logger.exception("failed to update prices")
         # print(f"[{datetime.now(TZ)}] failed to update prices:", e)
         logger.info(f"[{datetime.now(TZ)}] failed to update prices:", e)
 
-    finally:
-        conn.close()
+    # finally:
+    #     conn.close()
 
 
 def calculate_upnl():

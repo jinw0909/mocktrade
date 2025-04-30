@@ -10,235 +10,346 @@ logger = logging.getLogger(__name__)
 
 FEE_RATE = 0.0002  #0.02%
 
+
+def calculate_new_position(current_position, order):
+    logger.info(f"applying order_id of {order['id']}")
+    user_id     = order['user_id']
+    symbol      = order['symbol']
+    side        = order['side']        # side of the TP/SL order: 'buy' meaning closing a short
+    amount      = float(order['amount'])
+    price       = float(order['price'])  # this is the exit_price
+    leverage    = float(order['leverage'])
+    margin_type = order['margin_type']
+    from_order  = bool(order['from_order'])
+
+    # formatting precision
+    prec      = SYMBOL_CFG.get(symbol, {"price": 2, "qty": 3})
+    PRICE_DP  = prec["price"]
+    QTY_DP    = prec["qty"]
+
+    # 1) No existing position ⇒ already closed
+    if not current_position:
+        return {"status": "closed"}
+
+    # unpack current
+    cs        = current_position['side']           # 'buy' or 'sell'
+    cur_amt   = float(current_position['amount'])
+    cur_price = float(current_position['entry_price'])
+    cur_margin= float(current_position['margin'])
+    cur_size  = float(current_position['size'])
+    cur_lev   = float(current_position['leverage'])
+
+    # 2) Liquidation check
+    liq_price = float(current_position['liq_price'])
+    if (cs == 'buy' and price <= liq_price) or \
+            (cs == 'sell' and price >= liq_price):
+        # forced liquidation
+        return {
+            "user_id":    user_id,
+            "symbol":     symbol,
+            "amount":     0,
+            "entry_price": None,
+            "size":       0,
+            "margin":     0,
+            "leverage":   cur_lev,
+            "side":       cs,
+            "margin_type":margin_type,
+            "pnl":        -cur_margin,
+            "status":     4,
+            "liq_price":  None,
+            "close_price":price,
+            "close":      True
+        }
+
+    # decide how much to close
+    close_amt = cur_amt if not from_order else min(amount, cur_amt)
+
+    # compute PnL for the closed portion
+    if cs == 'buy':
+        raw_pnl = (price - cur_price) * close_amt
+    else:  # short
+        raw_pnl = (cur_price - price) * close_amt
+
+    fee     = abs(raw_pnl) * FEE_RATE
+    net_pnl = raw_pnl - fee
+
+    # full-close
+    if close_amt >= cur_amt:
+        return {
+            "user_id":     user_id,
+            "symbol":      symbol,
+            "amount":      0,
+            "entry_price": None,
+            "size":        0,
+            "margin":      0,
+            "leverage":    0,
+            "side":        cs,
+            "margin_type": margin_type,
+            "pnl":         round(net_pnl, PRICE_DP),
+            "close_pnl":   round(net_pnl, PRICE_DP),
+            "status":      3,
+            "liq_price":   None,
+            "close_price": price,
+            "close":       True
+        }
+
+    # partial-close
+    new_amt    = cur_amt - close_amt
+    new_size   = new_amt * cur_price
+    new_margin = cur_margin * (new_amt / cur_amt)
+
+    # recalc liquidation for remaining
+    # (you’ll need your own helper or inline formula)
+    new_liq = calc_iso_liq_price(cur_price, leverage, cs)
+
+    return {
+        "user_id":     user_id,
+        "symbol":      symbol,
+        "amount":      round(new_amt, QTY_DP),
+        "entry_price": round(cur_price, PRICE_DP),
+        "size":        round(new_size, PRICE_DP),
+        "margin":      round(new_margin, PRICE_DP),
+        "leverage":    leverage,
+        "side":        cs,
+        "margin_type": margin_type,
+        "pnl":         round(net_pnl, PRICE_DP),  # unrealized remains zero until closed
+        "close_pnl":   round(net_pnl, PRICE_DP),
+        "status":      1,
+        "liq_price":   round(new_liq, PRICE_DP),
+        "close_price": price
+    }
+
+def calculate_position(current_position, order):
+    """
+    Calculates the resulting position after applying an order (market or filled limit).
+    If position flips, calls mysql.position_flip and returns a fresh position.
+    """
+
+    user_id = order['user_id']
+    symbol = order['symbol']
+    side = order['side']  # buy or sell
+    amount = float(order['amount'])
+    price = float(order['price'])
+    leverage = float(order['leverage'])
+    margin_type = order['margin_type']
+
+    order_value = price * amount
+    order_margin = order_value / leverage
+
+    #helper to round by symbol
+    prec = SYMBOL_CFG.get(symbol, {"price": 2, "qty": 3})
+    PRICE_DP = prec["price"]
+    QTY_DP = prec["qty"]
+
+    # case 1. No current position -> create new
+    if not current_position:
+        logger.info("case 1, no current position")
+        liq_price = calc_iso_liq_price(
+            price,
+            leverage,
+            side
+        )
+
+        return {
+            "user_id": user_id,
+            "symbol": symbol,
+            "amount": round(amount, QTY_DP),
+            "entry_price": round(price, PRICE_DP),
+            "size": order_value,
+            "margin": order_margin,
+            "leverage": leverage,
+            "side": side,
+            "pnl": 0,
+            "margin_type": margin_type,
+            "status": 1,  # open
+            "liq_price": liq_price
+        }
+
+    ci = float(current_position['liq_price'])
+    cs = current_position['side']
+    if (cs == 'buy' and price <= ci) or (cs == 'sell' and price >= ci):
+        # return a force liquidation result immediately
+        return {
+            "user_id": current_position['user_id'],
+            "symbol": current_position['symbol'],
+            "amount": 0,
+            "entry_price": None,
+            "size": 0,
+            "margin": 0,
+            "leverage": float(current_position['leverage']),
+            "side": cs,
+            "margin_type": current_position['margin_type'],
+            "pnl": -float(current_position['margin']),
+            "status": 4,
+            "liq_price": None,
+            "close_price": price,
+            "close": True
+        }
+
+    # Existing position details
+    current_side = current_position['side']
+    current_amount = float(current_position['amount'])
+    current_entry_price = float(current_position['entry_price'])
+    current_margin = float(current_position['margin'])
+    current_size = float(current_position['size'])
+    current_pnl = float(current_position.get('pnl') or 0)
+    current_tp = current_position.get('tp')
+    current_sl = current_position.get('sl')
+
+    # case 2: Same-side -> merge positions
+    if current_side == side:
+        logger.info("case 2: same side")
+        total_amount = current_amount + amount
+        total_value = (current_entry_price * current_amount) + (price * amount)
+        avg_entry_price = total_value / total_amount
+        total_size = total_amount * avg_entry_price
+        total_margin = current_margin + order_margin
+        logger.info(f"current_margin: {current_margin}, order_margin: {order_margin}, total_margin: {total_margin}")
+        effective_leverage = total_size / total_margin if total_margin else leverage
+
+        # released_margin = calc_released_margin(current_margin, total_margin)
+        liq_price = calc_iso_liq_price(
+            avg_entry_price,
+            round(effective_leverage, 4),
+            side
+        )
+
+        return {
+            "user_id": user_id,
+            "symbol": symbol,
+            "amount": round(total_amount, QTY_DP),
+            "entry_price": round(avg_entry_price, PRICE_DP),
+            "size": total_size,
+            # "pnl": current_pnl,
+            "pnl": 0,
+            "margin": total_margin,
+            "leverage": round(effective_leverage, 4),
+            "side": side,
+            "margin_type": margin_type,
+            "status": 1,
+            "liq_price": liq_price,
+            "tp": current_tp,
+            "sl": current_sl,
+        }
+
+    # 🔁 Case 3: Opposite-side → partial close, full close, or flip
+    if amount < current_amount:
+        logger.info("case 3-1, opposite side, partial close")
+        # Partial close — reduce position
+        new_amount = current_amount - amount
+        close_pnl = (price - current_entry_price) * amount if current_side == 'buy' else (
+                                                                                                 current_entry_price - price) * amount
+        fee = abs(close_pnl) * FEE_RATE
+        net_close = close_pnl - fee
+        # new_pnl = current_pnl + close_pnl
+        new_pnl = close_pnl
+        new_margin = current_margin * (new_amount / current_amount)
+        new_size = new_amount * current_entry_price
+
+        effective_leverage = current_size / current_margin if current_margin else leverage
+
+        # released_margin = calc_released_margin(current_margin, new_margin)
+        liq_price = calc_iso_liq_price(
+            current_entry_price,
+            round(effective_leverage, 4),
+            current_side
+        )
+
+        return {
+            "user_id": user_id,
+            "symbol": symbol,
+            "amount": round(new_amount, QTY_DP),
+            "entry_price": current_entry_price,
+            "size": new_size,
+            "margin": new_margin,
+            "leverage": current_size / current_margin if current_margin else leverage,
+            "side": current_side,
+            "margin_type": margin_type,
+            "pnl": round(net_close, PRICE_DP),
+            "close_pnl": round(net_close, PRICE_DP),
+            "status": 1,
+            "liq_price": round(liq_price, PRICE_DP),
+            "tp": current_tp,
+            "sl": current_sl,
+            "close_price": round(price, PRICE_DP)
+        }
+
+    elif amount == current_amount:
+        logger.info("case 3-2, opposite side, full close")
+        # Full close — no new position
+        close_pnl = (price - current_entry_price) * amount if current_side == 'buy' else (
+                                                                                                 current_entry_price - price) * amount
+        # new_pnl = current_pnl + close_pnl
+        fee = abs(close_pnl) * FEE_RATE
+        new_pnl = close_pnl
+        net_close = close_pnl - fee
+
+        return {
+            "user_id": user_id,
+            "symbol": symbol,
+            "amount": 0,
+            "entry_price": None,
+            "size": 0,
+            "margin": 0,
+            "leverage": 0,
+            "side": current_side,
+            "margin_type": margin_type,
+            "pnl": round(net_close, PRICE_DP),
+            "close_pnl": round(net_close, PRICE_DP),
+            "status": 3,  # fully closed
+            "liq_price": None,
+            "tp": None,
+            "sl": None,
+            "close": True,
+            "close_price": round(price, PRICE_DP)
+        }
+
+    else:
+        # Flip — close current, open new opposite
+        logger.info("case 3-3, opposite side, flip")
+        flip_amount = amount - current_amount
+        close_pnl = (price - current_entry_price) * current_amount if current_side == 'buy' else (
+                                                                                                         current_entry_price - price) * current_amount
+        # new_pnl = close_pnl + current_pnl
+        fee = abs(close_pnl) * FEE_RATE
+        new_pnl = close_pnl
+        net_close = close_pnl - fee
+        new_value = price * flip_amount
+        new_margin = new_value / leverage
+
+        liq_price = calc_iso_liq_price(
+            price, leverage, side)
+
+        return {
+            "user_id": user_id,
+            "symbol": symbol,
+            "amount": round(flip_amount, QTY_DP),
+            "entry_price": round(price, PRICE_DP),
+            "size": new_value,
+            "margin": new_margin,
+            "leverage": leverage,
+            "side": side,  # now flipped
+            "margin_type": margin_type,
+            "pnl": round(price, PRICE_DP),
+            "close_pnl": round(net_close, PRICE_DP),
+            "status": 1,
+            "opposite": True,
+            "liq_price": round(liq_price, PRICE_DP),
+            "tp": None,
+            "sl": None,
+            "close": True,
+            "close_price": price
+        }
+
+def calc_iso_liq_price(entry_price: float,
+                       leverage: float,
+                       side: str) -> float | None:
+    if side == 'buy':  # LONG
+        return entry_price * (1 - 1 / leverage)
+    else:  # SHORT
+        return entry_price * (1 + 1 / leverage)
+
 class TradingService(MySQLAdapter):
-
-    def calc_iso_liq_price(self, entry_price: float,
-                           leverage: float,
-                           side: str) -> float | None:
-        if side == 'buy':  # LONG
-            return entry_price * (1 - 1 / leverage)
-        else:  # SHORT
-            return entry_price * (1 + 1 / leverage)
-
-    def calculate_position(self, current_position, order):
-        """
-        Calculates the resulting position after applying an order (market or filled limit).
-        If position flips, calls mysql.position_flip and returns a fresh position.
-        """
-
-        user_id = order['user_id']
-        symbol = order['symbol']
-        side = order['side']  # buy or sell
-        amount = float(order['amount'])
-        price = float(order['price'])
-        leverage = float(order['leverage'])
-        margin_type = order['margin_type']
-
-        order_value = price * amount
-        order_margin = order_value / leverage
-
-        #helper to round by symbol
-        prec = SYMBOL_CFG.get(symbol, {"price": 2, "qty": 3})
-        PRICE_DP = prec["price"]
-        QTY_DP = prec["qty"]
-
-        # case 1. No current position -> create new
-        if not current_position:
-            logger.info("case 1, no current position")
-            liq_price = self.calc_iso_liq_price(
-                price,
-                leverage,
-                side
-            )
-
-            return {
-                "user_id": user_id,
-                "symbol": symbol,
-                "amount": round(amount, QTY_DP),
-                "entry_price": round(price, PRICE_DP),
-                "size": order_value,
-                "margin": order_margin,
-                "leverage": leverage,
-                "side": side,
-                "pnl": 0,
-                "margin_type": margin_type,
-                "status": 1,  # open
-                "liq_price": liq_price
-            }
-
-        ci = float(current_position['liq_price'])
-        cs = current_position['side']
-        if (cs == 'buy' and price <= ci) or (cs == 'sell' and price >= ci):
-            # return a force liquidation result immediately
-            return {
-                "user_id": current_position['user_id'],
-                "symbol": current_position['symbol'],
-                "amount": 0,
-                "entry_price": None,
-                "size": 0,
-                "margin": 0,
-                "leverage": float(current_position['leverage']),
-                "side": cs,
-                "margin_type": current_position['margin_type'],
-                "pnl": -float(current_position['margin']),
-                "status": 4,
-                "liq_price": None,
-                "close_price": price
-            }
-
-        # Existing position details
-        current_side = current_position['side']
-        current_amount = float(current_position['amount'])
-        current_entry_price = float(current_position['entry_price'])
-        current_margin = float(current_position['margin'])
-        current_size = float(current_position['size'])
-        current_pnl = float(current_position.get('pnl') or 0)
-        current_tp = current_position.get('tp')
-        current_sl = current_position.get('sl')
-
-        # case 2: Same-side -> merge positions
-        if current_side == side:
-            logger.info("case 2: same side")
-            total_amount = current_amount + amount
-            total_value = (current_entry_price * current_amount) + (price * amount)
-            avg_entry_price = total_value / total_amount
-            total_size = total_amount * avg_entry_price
-            total_margin = current_margin + order_margin
-            effective_leverage = total_size / total_margin if total_margin else leverage
-
-            # released_margin = calc_released_margin(current_margin, total_margin)
-            liq_price = self.calc_iso_liq_price(
-                avg_entry_price,
-                round(effective_leverage, 4),
-                side
-            )
-
-            return {
-                "user_id": user_id,
-                "symbol": symbol,
-                "amount": round(total_amount, QTY_DP),
-                "entry_price": round(avg_entry_price, PRICE_DP),
-                "size": total_size,
-                # "pnl": current_pnl,
-                "pnl": 0,
-                "margin": total_margin,
-                "leverage": round(effective_leverage, 4),
-                "side": side,
-                "margin_type": margin_type,
-                "status": 1,
-                "liq_price": liq_price,
-                "tp": current_tp,
-                "sl": current_sl,
-            }
-
-        # 🔁 Case 3: Opposite-side → partial close, full close, or flip
-        if amount < current_amount:
-            logger.info("case 3-1, opposite side, partial close")
-            # Partial close — reduce position
-            new_amount = current_amount - amount
-            close_pnl = (price - current_entry_price) * amount if current_side == 'buy' else (
-                                                                                             current_entry_price - price) * amount
-            fee = abs(close_pnl) * FEE_RATE
-            net_close = close_pnl - fee
-            # new_pnl = current_pnl + close_pnl
-            new_pnl = close_pnl
-            new_margin = current_margin * (new_amount / current_amount)
-            new_size = new_amount * current_entry_price
-
-            effective_leverage = current_size / current_margin if current_margin else leverage
-
-            # released_margin = calc_released_margin(current_margin, new_margin)
-            liq_price = self.calc_iso_liq_price(
-                current_entry_price,
-                round(effective_leverage, 4),
-                current_side
-            )
-
-            return {
-                "user_id": user_id,
-                "symbol": symbol,
-                "amount": round(new_amount, QTY_DP),
-                "entry_price": current_entry_price,
-                "size": new_size,
-                "margin": new_margin,
-                "leverage": current_size / current_margin if current_margin else leverage,
-                "side": current_side,
-                "margin_type": margin_type,
-                "pnl": round(net_close, PRICE_DP),
-                "close_pnl": round(net_close, PRICE_DP),
-                "status": 1,
-                "liq_price": round(liq_price, PRICE_DP),
-                "tp": current_tp,
-                "sl": current_sl,
-                "close_price": round(price, PRICE_DP)
-            }
-
-        elif amount == current_amount:
-            logger.info("case 3-2, opposite side, full close")
-            # Full close — no new position
-            close_pnl = (price - current_entry_price) * amount if current_side == 'buy' else (
-                                                                                                     current_entry_price - price) * amount
-            # new_pnl = current_pnl + close_pnl
-            fee = abs(close_pnl) * FEE_RATE
-            new_pnl = close_pnl
-            net_close = close_pnl - fee
-
-            return {
-                "user_id": user_id,
-                "symbol": symbol,
-                "amount": 0,
-                "entry_price": None,
-                "size": 0,
-                "margin": 0,
-                "leverage": 0,
-                "side": current_side,
-                "margin_type": margin_type,
-                "pnl": round(net_close, PRICE_DP),
-                "close_pnl": round(net_close, PRICE_DP),
-                "status": 3,  # fully closed
-                "liq_price": None,
-                "tp": None,
-                "sl": None,
-                "close": True,
-                "close_price": round(price, PRICE_DP)
-            }
-
-        else:
-            # Flip — close current, open new opposite
-            logger.info("case 3-3, opposite side, flip")
-            flip_amount = amount - current_amount
-            close_pnl = (price - current_entry_price) * current_amount if current_side == 'buy' else (
-                                                                                                             current_entry_price - price) * current_amount
-            # new_pnl = close_pnl + current_pnl
-            fee = abs(close_pnl) * FEE_RATE
-            new_pnl = close_pnl
-            net_close = close_pnl - fee
-            new_value = price * flip_amount
-            new_margin = new_value / leverage
-
-            liq_price = self.calc_iso_liq_price(
-                price, leverage, side)
-
-            return {
-                "user_id": user_id,
-                "symbol": symbol,
-                "amount": round(flip_amount, QTY_DP),
-                "entry_price": round(price, PRICE_DP),
-                "size": new_value,
-                "margin": new_margin,
-                "leverage": leverage,
-                "side": side,  # now flipped
-                "margin_type": margin_type,
-                "pnl": round(price, PRICE_DP),
-                "close_pnl": round(net_close, PRICE_DP),
-                "status": 1,
-                "opposite": True,
-                "liq_price": round(liq_price, PRICE_DP),
-                "tp": None,
-                "sl": None,
-                "close": True,
-                "close_price": price
-            }
 
     def settle_limit_orders(self):
         conn = None
@@ -304,7 +415,7 @@ class TradingService(MySQLAdapter):
                 ))
 
                 # 2) Read balance & position
-                cursor.execute("SELECT balance FROM `mocktrade`.`user` WHERE `id`= %s", (user_id,))
+                cursor.execute("SELECT balance FROM `mocktrade`.`user` WHERE `id`= %s AND status = 0", (user_id,))
                 wallet_balance = cursor.fetchone()["balance"]
 
                 cursor.execute("""
@@ -316,7 +427,7 @@ class TradingService(MySQLAdapter):
                 current_position = cursor.fetchone()
 
                 # 3) Compute new_position
-                new_position = self.calculate_position(current_position, order)
+                new_position = calculate_position(current_position, order)
 
                 # 4) Persist new position ( + close old ones )
                 cursor.execute("""
@@ -348,12 +459,6 @@ class TradingService(MySQLAdapter):
                 #         (current_position['id'],)
                 #     )
 
-                # if the position being closed, close all the related tp/sl orders
-                if new_position.get('close'):
-                    cursor.execute("""
-                        UPDATE `mocktrade`.`order_history` SET `status` = 4
-                        WHERE `type` IN ('tp', 'sl') AND `user_id` = %s AND `symbol` = %s
-                    """, (user_id, symbol))
 
                 # 5) Update wallet for any realized PnL
                 close_pnl = new_position.get('close_pnl', 0)
@@ -372,6 +477,15 @@ class TradingService(MySQLAdapter):
                     (order_id,)
                 )
 
+                # 7) close relevant tp/sl orders
+                # if the position being closed, close all the related tp/sl orders
+                if new_position.get('close'):
+                    cursor.execute("""
+                        UPDATE `mocktrade`.`order_history` SET `status` = 4
+                        WHERE `type` IN ('tp', 'sl') AND `user_id` = %s AND `symbol` = %s
+                    """, (user_id, symbol))
+
+                # 8) If tp/sl order was attached
                 if (order["tp"] or order["sl"]) and new_position['amount'] > 0:
                     logger.info("opening tp/sl orders from the triggered limit order")
                     symbol = order['symbol']
@@ -379,21 +493,23 @@ class TradingService(MySQLAdapter):
                     limit_sl = order['sl']
                     limit_amount = order['amount']
                     limit_side = order['side']
+                    leverage = order['leverage']
 
                     order_side = 'sell' if limit_side == 'buy' else 'buy'
 
                     if limit_tp:
                         cursor.execute("""
                             INSERT INTO mocktrade.order_history (
-                                user_id, symbol, `type`, margin_type, side, amount, status
+                                user_id, symbol, `type`, margin_type, leverage, side, amount, status
                                 ,insert_time, update_time, tp, or_id )
                             VALUES (
-                                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s )
+                                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s )
                         """, (
                             user_id,
                             symbol,
                             'tp',
                             'isolated',
+                            leverage,
                             order_side,
                             limit_amount,
                             0,
@@ -407,15 +523,16 @@ class TradingService(MySQLAdapter):
                     if limit_sl:
                         cursor.execute("""
                             INSERT INTO mocktrade.order_history (
-                                user_id, symbol, `type`, margin_type, side, amount, status
+                                user_id, symbol, `type`, margin_type, leverage, side, amount, status
                                 ,insert_time, update_time, sl, or_id )
                             VALUES (
-                                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s )
+                                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s )
                         """, (
                             user_id,
                             symbol,
                             'sl',
                             'isolated',
+                            leverage,
                             order_side,
                             limit_amount,
                             0,
@@ -765,16 +882,212 @@ class TradingService(MySQLAdapter):
         finally:
             conn.close()
 
+    # def settle_tpsl_orders(self):
+    #     # mysql = MySQLAdapter()
+    #     try:
+    #         with self._get_connection() as conn, conn.cursor() as cursor:
+    #
+    #             # cursor.execute("SELECT price, symbol FROM mocktrade.prices")
+    #             # price_dict = {r['symbol']: r['price'] for r in cursor.fetchall()}
+    #
+    #             count = self.execute_tpsl(price_cache)
+    #             return count
+    #     except Exception as e:
+    #         logger.exception("Failed to settle tp/sl orders")
+    #         return {"error": "Error during settling tpsl orders"}
+
     def settle_tpsl_orders(self):
-        # mysql = MySQLAdapter()
+        conn = None
+        cursor = None
+        row_count = 0
         try:
-            with self._get_connection() as conn, conn.cursor() as cursor:
+            conn = self._get_connection()
+            cursor = conn.cursor()
 
-                # cursor.execute("SELECT price, symbol FROM mocktrade.prices")
-                # price_dict = {r['symbol']: r['price'] for r in cursor.fetchall()}
+            cursor.execute("""
+                SELECT 
+                    *,
+                    IF (oh.type = 'tp', oh.tp, oh.sl) AS exit_price,
+                    IF (oh.or_id IS NOT NULL, TRUE, FALSE) AS from_order
+                FROM mocktrade.order_history AS oh
+                WHERE oh.status = 0
+                AND oh.type in ('tp', 'sl')
+            """)
 
-                count = self.execute_tpsl(price_cache)
-                return count
-        except Exception as e:
-            logger.exception("Failed to settle tp/sl orders")
-            return {"error": "Error during settling tpsl orders"}
+            open_tpsl_orders = cursor.fetchall()
+            if not open_tpsl_orders:
+                conn.rollback()
+                return 0
+
+            price_dict = price_cache
+            for order in open_tpsl_orders:
+                logger.info(f"order: {order}")
+                order_id = order['id']
+                user_id = order['user_id']
+                symbol = order['symbol']
+                exit_price = order['exit_price']
+                from_order = order['from_order']
+                amount = order['amount']
+                leverage = order['leverage']
+                side = order['side']
+                order_type = order['type']
+
+                current_price = price_dict.get(symbol)
+                logger.info(f"current price : {current_price}, symbol: {symbol}")
+
+                if current_price is None:
+                    continue
+
+                should_settle = False
+
+                if order_type == 'tp':
+                    # take profit
+                    if (side == 'sell' and current_price >= exit_price) or (side == 'buy' and current_price <= exit_price):
+                        should_settle = True
+                else:
+                    # stop loss
+                    if (side == 'sell' and current_price <= exit_price) or (side == 'buy' and current_price >= exit_price):
+                        should_settle = True
+
+                if not should_settle:
+                    continue
+
+                if side == 'sell':
+                    exec_price = max(current_price, exit_price)
+                else:
+                    exec_price = min(current_price, exit_price)
+
+                # exec_price = current_price
+                exec_amount = float(amount)
+                exec_margin = (exec_price * exec_amount) / leverage
+
+                # 1) Persist execution values back to the order_history table
+                order['price'] = exec_price
+                order['margin'] = exec_margin
+
+
+                cursor.execute("""
+                    UPDATE mocktrade.order_history
+                    SET price = %s, 
+                        magin = %s,
+                        update_time = %s
+                    WHERE id = %s
+                """, (exec_price, exec_margin, datetime.now(timezone('Asia/Seoul')), order_id))
+
+                # 2) Read balance and position
+                cursor.execute("""
+                    SELECT balance FROM `mocktrade`.`user`
+                    WHERE id = %s
+                    AND status = 0
+                """, (user_id,))
+                wallet_balance = cursor.fetchone()['balance']
+
+                cursor.execute("""
+                    SELECT * FROM mocktrade.position_history
+                    WHERE symbol = %s
+                    AND user_id = %s
+                    AND status = 1
+                    ORDER BY `id` DESC
+                    LIMIT 1
+                    FOR UPDATE
+                """, (symbol, user_id))
+                current_position = cursor.fetchone()
+                logger.info(f"current position id: {current_position['id']}")
+
+                if current_position['status'] in (3, 4):
+                    continue
+                # 3) Compute new position status
+                new_position = calculate_new_position(current_position, order)
+
+
+                # 4) Persist new position
+                logger.info("setting the previous position status to 2")
+                cursor.execute("""
+                    UPDATE mocktrade.position_history
+                    SET status = 2
+                    WHERE status = 1
+                    AND user_id = %s
+                    AND symbol = %s                
+                """, (user_id, symbol))
+
+                logger.info("inserting a new position status at the tip of the table")
+                cursor.execute("""
+                    INSERT INTO mocktrade.position_history (
+                        user_id, symbol, size, amount, entry_price,
+                        liq_price, margin, pnl,
+                        margin_type, side, leverage, status, tp, sl, datetime, close_price 
+                    ) VALUES (
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                """, (
+                    new_position.get('user_id'), new_position.get('symbol'),
+                    new_position.get('size'), new_position.get('amount'),
+                    new_position.get('entry_price'), new_position.get('liq_price'),
+                    new_position.get('margin'),
+                    new_position.get('pnl'), new_position.get('margin_type'),
+                    new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
+                    new_position.get('tp'), new_position.get('sl'), datetime.now(timezone("Asia/Seoul")),
+                    new_position.get('close_price')
+                ))
+
+
+                logger.info("updating wallet status")
+                # 5) Update wallet for any realized pnl
+                close_pnl = new_position.get('close_pnl', 0)
+                if close_pnl:
+                    new_bal = wallet_balance + close_pnl
+                    if new_bal < 0:
+                        raise RuntimeError("Balance negative")
+                    cursor.execute("""
+                        UPDATE mocktrade.user 
+                        SET balance = %s
+                        WHERE id = %s AND status = 0
+                    """, (new_bal, user_id))
+
+                logger.info("marking the order settled")
+
+
+                # 6) Mark this order settled
+                if from_order:
+                    cursor.execute("""
+                        UPDATE mocktrade.order_history
+                        SET status = 4
+                        WHERE or_id = %s 
+                    """, (order['or_id'],))
+
+                cursor.execute("""
+                    UPDATE mocktrade.order_history
+                    SET status = 1
+                    WHERE id = %s
+                """, (order_id,))
+
+                row_count += 1
+
+
+                # 7) close relevant tp/sl positions
+                if new_position.get('close'):
+                    cursor.execute("""
+                        UPDATE mocktrade.order_history
+                        SET status = 4
+                        WHERE `type` IN ('tp', 'sl')
+                        AND `symbol` = %s
+                        AND `user_id` = %s
+                        AND status = 0
+                    """, (symbol, user_id))
+
+            conn.commit()
+            return row_count
+
+        except Exception:
+            if conn:
+                conn.rollback()
+            logger.exception("Failed to apply valid tp/sl orders")
+        finally:
+            if cursor:
+                try: cursor.close()
+                except: pass
+            if conn:
+                try: conn.close()
+                except: pass

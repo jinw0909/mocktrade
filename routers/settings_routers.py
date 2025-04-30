@@ -241,9 +241,11 @@ async def api_modifyFixedPriceCache(symbol: str, price: float):
         logger.exception(f"failed to update price of symbol : {symbol}")
         raise HTTPException(500, detail=str(e))
 
+
 @router.get('/fixedPriceCache', summary='show fixed price list', tags=["SETTINGS API"])
 async def api_showFixedPriceCache():
     try:
         return prices
     except Exception:
         logger.exception("Failed to load fixed price list")
+

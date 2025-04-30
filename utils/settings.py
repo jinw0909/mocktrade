@@ -16,6 +16,7 @@ import pytz
 from base64 import b64decode
 from utils.make_error import MakeErrorType
 import pandas as pd
+from collections import defaultdict
 
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 # from utils.make_error import MakeErrorType
@@ -38,6 +39,74 @@ config = Config(".env")
 from utils.price_cache import prices as price_cache
 
 logger = logging.getLogger("uvicorn")
+
+
+def compute_cross_liq_price(
+        entry_price: float,
+        amount: float,
+        leverage: float,
+        available_balance: float,
+        side: str
+) -> float:
+    """
+    Compute the cross-margin liquidation price for a single position,
+    using a fixed 0.5% maintenance margin
+
+    Args:
+        entry_price: the fill price of the position
+        amount: number of coins/contracts
+        leverage: the leverage factor
+        available_balance: current free cross-margin balance
+        side: 'buy' for long, 'sell' for short
+
+    Returns:
+        liq_price: the price at which this position would be liquidated
+    """
+    # fixed 0.5% maintenance rate
+    maintenance_margin_rate = 0.005
+
+    # 1) Notional value of the position
+    notional = entry_price * amount
+
+    # 2) Maintenance margin requirement (the collateral buffer)
+    maint_margin = notional * maintenance_margin_rate
+
+    # 3) Solve for the price at which equity == maintenance margin
+    # Equity = available_balance + (P_liq - entry) * amount  for longs
+    # Equity  =available_balance + (entry - P_liq) * amount  for shorts
+    if side == 'buy':
+        # long -> liquidate when price falls to this level
+        liq = (maint_margin - available_balance) / amount + entry_price
+    else:
+        # short -> liquidate when price rises to this level
+        liq = entry_price - (maint_margin - available_balance) / amount
+
+    # prices cannot go below zero
+    return max(liq, 0.0)
+
+
+def should_liquidate(
+        side: str,
+        current_price: float,
+        liq_price: float) -> bool:
+    """
+    Check whether a position has crossed its liquidation threshold.
+    :param side: 'buy' for long 'sell' for short
+    :param current_price: the latest market price
+    :param liq_price: the computed liquidation price
+    :return: True if the position should be liquidated now
+    """
+
+    if current_price is None:
+        return False
+
+    if side == 'buy':
+        # long -> liquidate when market <= liq_price
+        return current_price <= liq_price
+    else:
+        # short -> liquidate when market >= liq_price
+        return current_price >= liq_price
+
 
 class MySQLAdapter:
 
@@ -76,7 +145,8 @@ class MySQLAdapter:
             # print(config.get('HOST'))
             # print(config.get('PASS'))
             # print(config.get('DBNAME'))
-            connection = rd = redis.Redis(host='172.31.11.200', port=6379, db=0)
+            # connection = rd = redis.Redis(host='172.31.11.200', port=6379, db=0)
+            connection = rd = redis.Redis(host='localhost', port=6379, db=0)
 
 
         except Exception as e:
@@ -806,28 +876,139 @@ class MySQLAdapter:
             if conn:
                 conn.close()
 
-    def calculate_cross_positions(self):
+    def liquidate_cross_positions(self):
+        logger.info("running liquidate cross positions")
         conn = None
         cursor = None
+        row_count = 0
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM mocktrade.position_history
-                WHERE margin_type = 'cross'
-                AND status = 1
-            """)
-            active_cross_positions = cursor.fetchall()
 
+            # 1) grab all active cross-margin positions
             cursor.execute("""
                 SELECT * 
+                  FROM mocktrade.position_history
+                 WHERE margin_type = 'cross'
+                   AND status = 1
             """)
-            for pos in active_cross_positions:
-                # group by user_id
-                # group by
-                print('hi')
+            rows = cursor.fetchall()
 
+            # 2) group them by user_id
+            cross_by_user = defaultdict(list)
+            for row in rows:
+                cross_by_user[row['user_id']].append(row)
 
+            # 3) iterate each user's bucket
+            for user_id, positions in cross_by_user.items():
+                # — a) wallet balance
+                cursor.execute("""
+                    SELECT balance
+                      FROM mocktrade.user
+                     WHERE id     = %s
+                       AND status = 0
+                    LIMIT 1
+                """, (user_id,))
+                wallet_balance = cursor.fetchone()['balance'] or 0
+
+                # — b) frozen margin from these cross positions
+                cross_position_margin = sum(p['margin'] for p in positions)
+
+                # — c) frozen margin from pending cross orders
+                cursor.execute("""
+                    SELECT COALESCE(SUM(magin),0) AS frozen
+                      FROM mocktrade.order_history
+                     WHERE user_id    = %s
+                       AND status     = 0
+                       AND margin_type = 'cross'
+                       AND type IN ('market','limit')
+                """, (user_id,))
+                order_margin = cursor.fetchone()['frozen'] or 0
+
+                # — d) unrealized PnL from these cross positions
+                unrealized_pnl = sum(p['unrealized_pnl'] for p in positions)
+
+                # — e) compute available balance
+                available_balance = (
+                        wallet_balance
+                        - cross_position_margin
+                        - order_margin
+                        + unrealized_pnl
+                )
+
+                # 4) now loop each position for liq-price updates and possible liquidation
+                to_liquidate = []
+                for pos in positions:
+                    current = price_cache[pos['symbol']]
+                    new_liq = compute_cross_liq_price(
+                        entry_price = pos['entry_price'],
+                        amount = pos['amount'],
+                        leverage = pos['leverage'],
+                        available_balance = available_balance,
+                        side = pos['side']
+                        # ..maintenance params
+                    )
+                    if should_liquidate(pos['side'], current, new_liq):
+                        to_liquidate.append((pos, current))
+
+                # 2) liquidate them in one batch
+                for pos, exit_price in to_liquidate:
+                    # a) close the old position
+                    cursor.execute("""
+                        UPDATE mocktrade.position_history
+                        SET status = 2
+                        WHERE id = %s    
+                    """, (pos['id'],))
+
+                    # b) compute realized PnL on the fill
+                    pnl_liq = ((exit_price - pos['entry_price']) if pos['side'] == 'buy' else (pos['entry_price'] - exit_price)) * pos['amount']
+
+                    # c) insert the liquidation record (status = 4)
+                    cursor.execute("""
+                        INSERT INTO mocktrade.position_history (
+                          user_id, symbol, size, amount, entry_price,
+                          liq_price, margin,  pnl,
+                          margin_type, side, leverage, status, tp, sl, datetime, close_price
+                        ) VALUES (
+                          %s, %s, 0, 0, 0,
+                          0, 0, %s,
+                          %s, %s, %s, 4, %s, %s, %s, %s
+                        )
+                    """, (
+                            pos['user_id'], pos['symbol'], pnl_liq,
+                            pos['margin_type'], pos['side'], pos['leverage'],
+                            pos['tp'], pos['sl'],
+                            datetime.now(timezone("Asia/Seoul")),
+                            exit_price
+                        ))
+
+                    row_count += 1
+
+                    # d) free its collateral and PnL back into our pool
+                    available_balance += pos['margin']
+
+                # 3) remove them from your working list
+                remaining = [p for p in positions if p['id'] not in {p[0]['id'] for p in to_liquidate}]
+
+                # 4) final pass: update liq_price on survivors
+                for pos in remaining:
+                    final_liq = compute_cross_liq_price(
+                        entry_price = pos['entry_price'],
+                        amount = pos['amount'],
+                        leverage = pos['leverage'],
+                        available_balance = available_balance,
+                        side = pos['side']
+                        # ..maintenance params
+                    )
+                    if final_liq != pos['liq_price']:
+                        cursor.execute("""
+                            UPDATE mocktrade.position_history
+                            SET liq_price = %s
+                            WHERE id = %s
+                        """, (final_liq, pos['id']))
+
+            conn.commit()
+            return row_count
         except Exception:
             logger.exception("Failed to calculate cross_positions")
             if conn:

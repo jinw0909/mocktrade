@@ -9,7 +9,10 @@ from typing import Optional
 from utils.settings import MySQLAdapter
 import traceback
 from services.trading import TradingService
+import logging
 router = APIRouter()
+
+logger = logging.getLogger('uvicorn')
 
 MAINT_RATE = 0.005         # first notional tier: 0.5 %
 
@@ -359,6 +362,17 @@ def api_liquidatePositions():
         print(str(e))
         traceback.print_exc()
         return {"error": f"Error while liquidating positions: {str(e)}"}
+
+
+@router.post('/liquidateCross', summary="liquidate cross positions if condition met", tags=["EXECUTE API"])
+async def api_liquidateCross():
+    try:
+        mysql = MySQLAdapter()
+        count = mysql.liquidate_cross_positions()
+        logger.info(f"number of positions liquidated: {count}")
+        return {"number of liquidated cross positions": count}
+    except Exception:
+        logger.exception("")
 
 
 @router.post('/calculate_upnl', summary='calculate unrealized pnl of active positions', tags=['EXECUTE API'])

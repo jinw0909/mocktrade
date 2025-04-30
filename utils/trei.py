@@ -79,7 +79,8 @@ class MySQLAdapter:
             # print(config.get('HOST'))
             # print(config.get('PASS'))
             # print(config.get('DBNAME'))
-            connection = rd = redis.Redis(host='172.31.11.200', port=6379, db=0)
+            # connection = rd = redis.Redis(host='172.31.11.200', port=6379, db=0)
+            connection = rd = redis.Redis(host='localhost', port=6379, db=0)
 
 
         except Exception as e:
@@ -799,6 +800,147 @@ class MySQLAdapter:
             pass 
     
 
+    def sell_limit_order(self, user_no: int, symbol: str, margin_type: int, leverage: int,price : float, usdt=0, amount=0,tp=0,sl=0)  :
+        print("sell limit order")
+        user = self.get_user(user_no)
+        check = MakeErrorType()
+        rd = self._get_redis()
+        # margin_type을 'isolated' 또는 'cross'로 설정
+
+        new_price = rd.get(f'price:{symbol}USDT')
+        price_ch,qty_ch=self.get_qty(symbol)
+
+        if new_price:  # price 값이 None이 아닌 경우에만 진행
+            new_price1 = float(new_price.decode())  # 바이트 문자열을 디코딩하여 float로 변환'
+            # new_price1 = float(new_price)
+
+        margin_type1=margin_type
+        usdt1=usdt
+        margin_type = 'isolated' if margin_type == 0 else 'cross'
+        print('user',user_no, 'symbol',symbol,'margin_type', margin_type,'lever', leverage,'price',price,'usdt', usdt,'amount', amount)
+
+        if    margin_type=='isolated':
+            new_margin_type='cross'
+        else:
+            new_margin_type='isolated'
+
+        check_magin_type=self.check_magin_mode(user_no,symbol,new_margin_type)
+        print("check_magin_type",check_magin_type, new_margin_type)
+        if check_magin_type ==True:
+
+            self.return_dict_data['reCode']=103
+            self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+            self.status_code=423
+
+            return False
+        try:
+            if user:  # user가 True인 경우에만 처리
+                balance=self.get_diff_balance(user_no)
+
+                position_chck=self.get_position_list(user_no,symbol)
+
+                if price:  # price 값이 None이 아닌 경우에만 진행
+
+                    if tp !=0:
+                        if price < tp :
+
+                            self.return_dict_data['results']=[]
+                            self.return_dict_data['reCode']=30006
+                            self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                            self.status_code=423
+
+
+                            return False
+                    if sl != 0:
+                        if price >sl :
+                            self.return_dict_data['results']=[]
+                            self.return_dict_data['reCode']=30006
+                            self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                            self.status_code=423
+
+                            return False
+
+
+
+                    if usdt > 0:  # usdt를 사용하는 경우
+
+                        print('여기')
+                        susu=usdt*0.0002
+                        usdt=usdt-susu
+                        new_usdt = usdt / leverage  # 새로운 USDT 계산
+                        new_amount = usdt / price  # 새로운 금액 계산
+                        print("new_amount",new_amount)
+                        print("new_usdt",new_usdt)
+
+                    elif amount > 0:  # amount를 사용하는 경우
+
+                        print('여기1')
+                        usdt=(amount * price)
+                        susu=usdt*0.0002
+                        usdt=usdt-susu
+                        new_usdt = ((amount * price) / leverage) -susu # 새로운 USDT 계산
+                        new_amount = amount  # 금액은 그대로 사용
+
+                        print("new_amount",new_amount)
+                        print("new_usdt",new_usdt,usdt)
+                        print('usdt',usdt)
+                    # 주문 기록 삽입
+
+                    if len(position_chck)>0:
+
+                        position_magin=position_chck[0]['size']
+                        if position_chck[0]['side']=='buy':
+                            position_side=True
+
+                        else:
+                            position_side=False
+
+
+                    else:
+                        position_magin=0
+                        position_side=False
+
+
+                    if position_side ==True:
+
+                        new_balance=float(balance)-new_usdt +float(position_magin)
+
+
+                    else:
+
+                        new_balance=float(balance)-new_usdt
+
+
+                    print('new_balance',new_balance)
+
+
+                    if new_balance >= 0:
+                        print('new_balance:',new_balance)
+
+
+                        if new_price1>price:
+
+                            self.sell_market_order(user_no , symbol, margin_type1, leverage, usdt1, amount,tp,sl)
+                        else:
+
+                            self.inser_oder_history(user_no, symbol, 'limit', margin_type, 'sell', price, new_usdt ,self.floor_to_n_decimal(new_amount,qty_ch), leverage, 0,price,tp,sl)
+
+                        self.return_dict_data['results']=[]
+                        self.return_dict_data['reCode']=0
+                        self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                        self.status_code=200
+
+                    else:
+                        print('발란스부족')
+                        self.return_dict_data['results']=[]
+                        self.return_dict_data['reCode']=104
+                        self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                        self.status_code=423
+        except Exception as e:
+            print(e)
+        # return return_data
+
+
     def buy_limit_order(self,user_no: int, symbol: str, margin_type: int, leverage: int,price : float, usdt=0, amount=0,tp=0,sl=0 ) :
         user = self.get_user(user_no)
         check = MakeErrorType()
@@ -850,37 +992,37 @@ class MySQLAdapter:
 
                 #     return False
 
-                
+
                 position_chck=self.get_position_list(user_no,symbol)
-                
-                
-                
+
+
+
                 # if  price > new_price1 :
-                    
+
                 #     self.return_dict_data['results']=[]
                 #     self.return_dict_data['reCode']=30007
                 #     self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
                 #     self.status_code=423
-                    
-                    
-                    
+
+
+
                 #     return False
-                    
+
                 print('adasdsadas')
                 if price:  # price 값이 None이 아닌 경우에만 진행
-                    
-                 
-                    
+
+
+
                     if tp != 0:
                         if price > tp :
-                            
+
                             self.return_dict_data['results']=[]
                             self.return_dict_data['reCode']=30006
                             self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
                             self.status_code=423
-                            
-                            
-                            
+
+
+
                             return False
                     if sl != 0:
                         if price < sl  :
@@ -888,12 +1030,12 @@ class MySQLAdapter:
                             self.return_dict_data['reCode']=30006
                             self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
                             self.status_code=423
-                            
+
                             return False
 
-                    
-                    
-                
+
+
+
                     print('sadasdasdas')
 
                     if usdt > 0:  # usdt를 사용하는 경우
@@ -914,42 +1056,42 @@ class MySQLAdapter:
                         usdt=usdt-susu
                         new_usdt = ((amount * price) / leverage )-susu # 새로운 USDT 계산
                         new_amount = amount  # 금액은 그대로 사용
-                       
+
                         print("new_amount",new_amount)
                         print("new_usdt",new_usdt,usdt)
                         print('usdt',usdt)
                     # 주문 기록 삽입
                     if len(position_chck)>0:
-                        
+
                         position_magin=position_chck[0]['size']
                         if position_chck[0]['side']=='sell':
                             position_side=True
-                        
+
                         else:
-                            position_side=False   
-                            
-                        
+                            position_side=False
+
+
                     else:
                         position_magin=0
                         position_side=False
-                        
-                        
+
+
                     if position_side ==True:
-                        
+
                         new_balance=float(balance)-new_usdt +float(position_magin)
-                        
-                        
+
+
                     else:
-                        
-                        new_balance=float(balance)-new_usdt 
+
+                        new_balance=float(balance)-new_usdt
                     print('new_balance:',new_balance)
                     if new_balance >= 0:
-                       
-                        
+
+
                         if new_price1<price:
                             print('222222222222222222')
                             self.buy_market_order(user_no , symbol, margin_type1, leverage, usdt1, amount,tp,sl)
-                            
+
                         else:
                             print('233333333333333')
 
@@ -975,155 +1117,10 @@ class MySQLAdapter:
         # return return_data
 
 
-    async def sell_limit_order(self, user_no: int, symbol: str, margin_type: int, leverage: int,price : float, usdt=0, amount=0,tp=0,sl=0)  :
-        user = self.get_user(user_no)
-        check = MakeErrorType()
-        rd = self._get_redis()
-        # margin_type을 'isolated' 또는 'cross'로 설정
-
-        new_price = await rd.get(f'price:{symbol}USDT')
-        price_ch,qty_ch=self.get_qty(symbol)         
-
-        if new_price:  # price 값이 None이 아닌 경우에만 진행
-            new_price1 = float(new_price.decode())  # 바이트 문자열을 디코딩하여 float로 변환'
-            # new_price1 = float(new_price)
-
-        margin_type1=margin_type
-        usdt1=usdt
-        margin_type = 'isolated' if margin_type == 0 else 'cross'
-        print('user',user_no, 'symbol',symbol,'margin_type', margin_type,'lever', leverage,'price',price,'usdt', usdt,'amount', amount)
-
-        if    margin_type=='isolated':
-            new_margin_type='cross'
-        else:
-            new_margin_type='isolated'
-
-        check_magin_type=self.check_magin_mode(user_no,symbol,new_margin_type)
-        print("check_magin_type",check_magin_type, new_margin_type)
-        if check_magin_type ==True:
-
-            self.return_dict_data['reCode']=103
-            self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
-            self.status_code=423
-
-            return False
-        try:
-            if user:  # user가 True인 경우에만 처리
-                balance=self.get_diff_balance(user_no)
-
-                position_chck=self.get_position_list(user_no,symbol)
-        
-                    
-                    
-                
-                
-                if price:  # price 값이 None이 아닌 경우에만 진행
-
-                    if tp !=0:
-                        if price < tp :
-                            
-                            self.return_dict_data['results']=[]
-                            self.return_dict_data['reCode']=30006
-                            self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
-                            self.status_code=423
-                            
-                            
-                            
-                            return False
-                    if sl != 0:
-                        if price >sl :
-                            self.return_dict_data['results']=[]
-                            self.return_dict_data['reCode']=30006
-                            self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
-                            self.status_code=423
-                            
-                            return False
-                
-                    
-
-                    if usdt > 0:  # usdt를 사용하는 경우
-
-                        print('여기')
-                        susu=usdt*0.0002
-                        usdt=usdt-susu
-                        new_usdt = usdt / leverage  # 새로운 USDT 계산
-                        new_amount = usdt / price  # 새로운 금액 계산
-                        print("new_amount",new_amount)
-                        print("new_usdt",new_usdt)
-
-                    elif amount > 0:  # amount를 사용하는 경우
-
-                        print('여기1')
-                        usdt=(amount * price)
-                        susu=usdt*0.0002
-                        usdt=usdt-susu
-                        new_usdt = ((amount * price) / leverage) -susu # 새로운 USDT 계산
-                        new_amount = amount  # 금액은 그대로 사용
-                        
-                        print("new_amount",new_amount)
-                        print("new_usdt",new_usdt,usdt)
-                        print('usdt',usdt)
-                    # 주문 기록 삽입
-
-                    if len(position_chck)>0:
-                        
-                        position_magin=position_chck[0]['size']
-                        if position_chck[0]['side']=='buy':
-                            position_side=True
-                        
-                        else:
-                            position_side=False   
-                            
-                        
-                    else:
-                        position_magin=0
-                        position_side=False
-                        
-                        
-                    if position_side ==True:
-                        
-                        new_balance=float(balance)-new_usdt +float(position_magin)
-                        
-                        
-                    else:
-                        
-                        new_balance=float(balance)-new_usdt 
-                    
-                    
-                    print('new_balance',new_balance)
-                    
-
-                    if new_balance >= 0:
-                        print('new_balance:',new_balance)
-
-                        
-                        if new_price1>price:
-                            
-                            self.sell_market_order(user_no , symbol, margin_type1, leverage, usdt1, amount,tp,sl)
-                        else:
-                    
-                            self.inser_oder_history(user_no, symbol, 'limit', margin_type, 'sell', price, new_usdt ,self.floor_to_n_decimal(new_amount,qty_ch), leverage, 0,price,tp,sl)
-
-                        self.return_dict_data['results']=[]
-                        self.return_dict_data['reCode']=0
-                        self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
-                        self.status_code=200
-
-                    else:
-                        print('발란스부족')
-                        self.return_dict_data['results']=[]
-                        self.return_dict_data['reCode']=104
-                        self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
-                        self.status_code=423
-        except Exception as e:
-            print(e)
-        # return return_data
-
-
 
 
     def buy_market_order(self, user_no: int, symbol: str, margin_type: int, leverage: int, usdt=0, amount=0,tp=0,sl=0):
-        # rd = self._get_redis()
+        rd = self._get_redis()
         user = self.get_user(user_no)
         check = MakeErrorType()
         usdt1=usdt
@@ -1179,15 +1176,9 @@ class MySQLAdapter:
 
                 # price 값 가져오기
 
-                # price = rd.get(f'price:{symbol}USDT')
-                conn = self._get_connection()
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT price FROM mocktrade.prices
-                    WHERE symbol = %s
-                """, symbol)
-                price = cursor.fetchone()['price']
-                
+                price = rd.get(f'price:{symbol}USDT')
+                price = float(price.decode())
+
                 
 
                 if price:  # price 값이 None이 아닌 경우에만 진행
