@@ -1,8 +1,7 @@
 # THIS FILE IS AUTO‐GENERATED — do not edit by hand!
 from typing import Dict
 
-prices: Dict[str, float] = {
-  '1000000MOG': 0.5184,
+prices: Dict[str, float] = { '1000000MOG': 0.5184,
   '1000BONK': 0.013937,
   '1000BONKUSDC': 0.0,
   '1000CAT': 0.006423,

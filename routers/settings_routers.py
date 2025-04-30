@@ -145,12 +145,17 @@ async def api_createSymbolCache():
             symbol_cache[symbol] = {"price": pi, "qty": qi}
 
         # prepare the Python file contents
-        header = '''\
-# THIS FILE IS AUTO‐GENERATED — do not edit by hand!
-from typing import Dict
-
-symbols: Dict[str, Dict[str, int]] = 
-'''
+#         header = '''\
+# # THIS FILE IS AUTO‐GENERATED — do not edit by hand!
+# from typing import Dict
+#
+# symbols: Dict[str, Dict[str, int]] =
+# '''
+        header = (
+            "# THIS FILE IS AUTO‐GENERATED — do not edit by hand!\n"
+            "from typing import Dict\n\n"
+            "symbols: Dict[str, Dict[str, int]] = "
+        )
         body = pformat(symbol_cache, indent=2)
         content = header + body + "\n"
 
@@ -200,12 +205,17 @@ async def api_createFixedPriceCache():
         # cursor.close()
         fixed_price_cache = {r['symbol']: r['price'] for r in rows}
 
-        header = '''\
-# THIS FILE IS AUTO‐GENERATED — do not edit by hand!
-from typing import Dict
-
-prices: Dict[str, float] = 
-'''
+#         header = '''\
+# # THIS FILE IS AUTO‐GENERATED — do not edit by hand!
+# from typing import Dict
+#
+# prices: Dict[str, float] =
+# '''
+        header = (
+            "# THIS FILE IS AUTO‐GENERATED — do not edit by hand!\n"
+            "from typing import Dict\n\n"
+            "prices: Dict[str, float] = "
+        )
         body = pformat(fixed_price_cache, indent=2)
         content = header + body + '\n'
         os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
