@@ -146,8 +146,7 @@ class MySQLAdapter:
             # print(config.get('PASS'))
             # print(config.get('DBNAME'))
             # connection = rd = redis.Redis(host='172.31.11.200', port=6379, db=0)
-            host = os.getenv("REDIS_HOST")
-            connection = rd = redis.Redis(host=host, port=6379, db=0)
+            connection = rd = redis.Redis(host=config.get("REDIS_HOST"), port=6379, db=0)
 
 
         except Exception as e:
