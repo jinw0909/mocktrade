@@ -3,15 +3,16 @@ import asyncio
 import json
 import logging
 
+from starlette.config import Config
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import redis.asyncio as aioredis
 
 router = APIRouter()
 logger = logging.getLogger("pnl_ws")
-
+config = Config('.env')
 # Redis clients (reuse your configured URLs)
 position_redis = aioredis.from_url("redis://localhost:6379/0", decode_responses=True)
-price_redis    = aioredis.from_url("redis://172.31.11.200:6379/0", decode_responses=True)
+price_redis    = aioredis.from_url("redis://" + config.get("REDIS_HOST") + ":6379/0", decode_responses=True)
 
 
 @router.websocket("/{user_id}")

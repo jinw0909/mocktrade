@@ -368,9 +368,11 @@ def api_liquidatePositions():
 async def api_liquidateCross():
     try:
         mysql = MySQLAdapter()
-        count = mysql.liquidate_cross_positions()
-        logger.info(f"number of positions liquidated: {count}")
-        return {"number of liquidated cross positions": count}
+        result = mysql.liquidate_cross_positions()
+        liq_count = result.get('liq_count')
+        row_count = result.get('row_count')
+        logger.info(f"number of positions liquidated: {liq_count}, number of rows updated with liq_price: {row_count}")
+        return {"number of liquidated cross positions": liq_count, "number of rows updated with liq_price" : row_count }
     except Exception:
         logger.exception("")
 

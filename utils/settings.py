@@ -877,10 +877,10 @@ class MySQLAdapter:
                 conn.close()
 
     def liquidate_cross_positions(self):
-        logger.info("running liquidate cross positions")
         conn = None
         cursor = None
         row_count = 0
+        liq_count = 0
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -982,7 +982,7 @@ class MySQLAdapter:
                             exit_price
                         ))
 
-                    row_count += 1
+                    liq_count += 1
 
                     # d) free its collateral and PnL back into our pool
                     available_balance += pos['margin']
@@ -1007,8 +1007,13 @@ class MySQLAdapter:
                             WHERE id = %s
                         """, (final_liq, pos['id']))
 
+                    row_count += 1
+
             conn.commit()
-            return row_count
+            return {
+                "row_count" : row_count,
+                "liq_count" : liq_count
+            }
         except Exception:
             logger.exception("Failed to calculate cross_positions")
             if conn:

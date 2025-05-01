@@ -32,7 +32,7 @@ mysql = MySQLAdapter()
 trader = TradingService()
 
 
-def calculate_cross():
+def liquidate_cross():
 
     try:
         mysql = MySQLAdapter()
@@ -48,9 +48,9 @@ def run_all_jobs():
     liquidate_positions()
     settle_limit_orders()
     settle_tpsl_orders()
-    update_position_status_to_redis()
+    #update_position_status_to_redis()
     calculate_upnl()
-    # calculate_cross()
+    # liquidate_cross()
 
 def fetch_prices(symbols):
     rd = mysql._get_redis()
@@ -150,7 +150,7 @@ def update_all_prices():
         # conn.commit()
         # print(f"[{datetime.now(TZ)}] updated prices for: {', '.join(new_prices)}")
         # print(f"updated {len(new_prices)} number of prices from redis")
-        logger.info(f"updated {len(new_prices)} number of prices from redis")
+        logger.info(f"updated {len(new_prices)} number of prices from redis at {datetime.now(TZ)}")
 
     except Exception as e:
         # conn.rollback()
@@ -211,6 +211,13 @@ scheduler.add_job(
     trigger=IntervalTrigger(minutes=1),
     next_run_time=datetime.now(),
     id="orchestrator",
+    replace_existing=True
+)
+scheduler.add_job(
+    update_position_status_to_redis,
+    trigger=IntervalTrigger(seconds=5),
+    next_run_time=datetime.now(),
+    id="pnlCalculator",
     replace_existing=True
 )
 
