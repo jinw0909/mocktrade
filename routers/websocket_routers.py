@@ -5,6 +5,7 @@ import logging
 
 from starlette.config import Config
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from utils.connection_manager import manager
 import redis.asyncio as aioredis
 
 router = APIRouter()
@@ -17,7 +18,8 @@ price_redis    = aioredis.from_url("redis://" + config.get("REDIS_HOST") + ":637
 
 @router.websocket("/{user_id}")
 async def pnl_stream(websocket: WebSocket, user_id: str):
-    await websocket.accept()
+    # await websocket.accept()
+    await manager.connect(user_id, websocket)
     logger.info(f"User {user_id} connected to PnL stream")
     try:
         while True:
@@ -84,4 +86,4 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
         logger.exception(f"Unexpected error in PnL stream for user {user_id}")
     finally:
         # any necessary cleanup here
-        pass
+        manager.disconnect(user_id, websocket)

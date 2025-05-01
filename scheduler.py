@@ -215,7 +215,7 @@ scheduler.add_job(
 )
 scheduler.add_job(
     update_position_status_to_redis,
-    trigger=IntervalTrigger(seconds=5),
+    trigger=IntervalTrigger(seconds=10),
     next_run_time=datetime.now(),
     id="pnlCalculator",
     replace_existing=True
