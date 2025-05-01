@@ -369,7 +369,6 @@ class TradingService(MySQLAdapter):
                 SELECT * FROM mocktrade.order_history
                  WHERE `type`= 'limit'
                    AND `status`= 0
-                   AND `margin_type` = 'isolated'
                 ORDER BY `id` DESC
             """)
             open_orders = cursor.fetchall()
