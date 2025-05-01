@@ -43,14 +43,14 @@ def liquidate_cross():
 
 
 
-def run_all_jobs():
+async def run_all_jobs():
     update_all_prices()
     liquidate_positions()
     settle_limit_orders()
     settle_tpsl_orders()
-    #update_position_status_to_redis()
+    # await update_position_status_to_redis()
     calculate_upnl()
-    # liquidate_cross()
+    # await liquidate_cross()
 
 def fetch_prices(symbols):
     rd = mysql._get_redis()
@@ -228,6 +228,7 @@ def start_scheduler():
     # settle_limit_orders()
     # settle_tpsl_orders()
     # calculate_upnl()
+    # update_all_prices()
     scheduler.start()
 
 
