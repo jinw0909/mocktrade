@@ -450,6 +450,7 @@ class MySQLAdapter:
                 amount = float(find_result["amount"])
                 side = find_result["side"]
                 margin = float(find_result['margin'])
+                margin_type = find_result['margin_type']
 
                 # 2. Get current price
                 # price_sql = """
@@ -510,7 +511,7 @@ class MySQLAdapter:
                     None,
                     0,
                     derived_pnl,
-                    'isolated',
+                    margin_type,
                     side,
                     0,
                     new_status,
@@ -921,7 +922,7 @@ class MySQLAdapter:
                      WHERE user_id    = %s
                        AND status     = 0
                        AND margin_type = 'cross'
-                       AND type IN ('market','limit')
+                       AND `type` IN ('market','limit')
                 """, (user_id,))
                 order_margin = cursor.fetchone()['frozen'] or 0
 
@@ -935,6 +936,7 @@ class MySQLAdapter:
                         - order_margin
                         + unrealized_pnl
                 )
+                logger.info(f"available balance: {available_balance}")
 
                 # 4) now loop each position for liq-price updates and possible liquidation
                 to_liquidate = []
@@ -952,6 +954,7 @@ class MySQLAdapter:
                         to_liquidate.append((pos, current))
 
                 # 2) liquidate them in one batch
+                logger.info(f"to_liquidate: {to_liquidate}")
                 for pos, exit_price in to_liquidate:
                     # a) close the old position
                     cursor.execute("""
@@ -982,10 +985,18 @@ class MySQLAdapter:
                             exit_price
                         ))
 
-                    liq_count += 1
+                    # d) apply realized PnL to user's wallet balance
+                    cursor.execute("""
+                        UPDATE mocktrade.user
+                           SET balance = balance + %s
+                         WHERE id = %s
+                    """, (pnl_liq, pos['user_id']))
 
                     # d) free its collateral and PnL back into our pool
                     available_balance += pos['margin']
+                    logger.info(f"available balance after position liquidate: {available_balance}")
+
+                    liq_count += 1
 
                 # 3) remove them from your working list
                 remaining = [p for p in positions if p['id'] not in {p[0]['id'] for p in to_liquidate}]
