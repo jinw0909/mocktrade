@@ -936,7 +936,7 @@ class MySQLAdapter:
                         - order_margin
                         + unrealized_pnl
                 )
-                logger.info(f"available balance: {available_balance}")
+                # logger.info(f"available balance: {available_balance}")
 
                 # 4) now loop each position for liq-price updates and possible liquidation
                 to_liquidate = []
@@ -954,7 +954,7 @@ class MySQLAdapter:
                         to_liquidate.append((pos, current))
 
                 # 2) liquidate them in one batch
-                logger.info(f"to_liquidate: {to_liquidate}")
+                # logger.info(f"to_liquidate: {to_liquidate}")
                 for pos, exit_price in to_liquidate:
                     # a) close the old position
                     cursor.execute("""

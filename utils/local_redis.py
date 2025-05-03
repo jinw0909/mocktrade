@@ -17,7 +17,7 @@ redis_client = redis.Redis(
 
 
 async def update_position_status_to_redis():
-    logger.info("updating position status to the local redis")
+    # logger.info("updating position status to the local redis")
     mysql = MySQLAdapter()
     conn = mysql._get_connection()
     cursor = conn.cursor()

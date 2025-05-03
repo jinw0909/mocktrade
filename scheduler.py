@@ -36,8 +36,10 @@ def liquidate_cross():
 
     try:
         mysql = MySQLAdapter()
-        count = mysql.liquidate_cross_positions()
-        return {"success": f"total {count} rows of cross positions calculated"}
+        result = mysql.liquidate_cross_positions()
+        liq_count = result.get('liq_count', 0)
+        row_count = result.get('row_count', 0)
+        logger.info(f"executing liquidate_cross_position at {datetime.now(timezone('Asia/Seoul'))}. Total {row_count} cross positions liq_price derived and {liq_count} liquidated")
     except Exception:
         logger.exception("Error during calculating cross margin positions")
 
@@ -50,7 +52,7 @@ async def run_all_jobs():
     settle_tpsl_orders()
     # await update_position_status_to_redis()
     calculate_upnl()
-    # await liquidate_cross()
+    liquidate_cross()
 
 def fetch_prices(symbols):
     rd = mysql._get_redis()
