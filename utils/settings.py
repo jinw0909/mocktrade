@@ -877,6 +877,172 @@ class MySQLAdapter:
             if conn:
                 conn.close()
 
+    # def liquidate_cross_positions(self):
+    #     conn = None
+    #     cursor = None
+    #     row_count = 0
+    #     liq_count = 0
+    #     try:
+    #         conn = self._get_connection()
+    #         cursor = conn.cursor()
+    #
+    #         # 1) grab all active cross-margin positions
+    #         cursor.execute("""
+    #             SELECT *
+    #               FROM mocktrade.position_history
+    #              WHERE margin_type = 'cross'
+    #                AND status = 1
+    #         """)
+    #         rows = cursor.fetchall()
+    #
+    #         # 2) group them by user_id
+    #         cross_by_user = defaultdict(list)
+    #         for row in rows:
+    #             cross_by_user[row['user_id']].append(row)
+    #
+    #         # 3) iterate each user's bucket
+    #         for user_id, positions in cross_by_user.items():
+    #             # — a) wallet balance
+    #             cursor.execute("""
+    #                 SELECT balance
+    #                   FROM mocktrade.user
+    #                  WHERE id     = %s
+    #                    AND status = 0
+    #                 LIMIT 1
+    #             """, (user_id,))
+    #             wallet_balance = cursor.fetchone()['balance'] or 0
+    #
+    #             # — b) frozen margin from these cross positions
+    #             cross_position_margin = sum(p['margin'] for p in positions)
+    #
+    #             # — c) frozen margin from pending cross orders
+    #             cursor.execute("""
+    #                 SELECT COALESCE(SUM(magin),0) AS frozen
+    #                   FROM mocktrade.order_history
+    #                  WHERE user_id    = %s
+    #                    AND status     = 0
+    #                    AND margin_type = 'cross'
+    #                    AND `type` IN ('market','limit')
+    #             """, (user_id,))
+    #             order_margin = cursor.fetchone()['frozen'] or 0
+    #
+    #             # — d) unrealized PnL from these cross positions
+    #             unrealized_pnl = sum(p['unrealized_pnl'] for p in positions)
+    #
+    #             # — e) compute available balance
+    #             available_balance = (
+    #                     wallet_balance
+    #                     - cross_position_margin
+    #                     - order_margin
+    #                     + unrealized_pnl
+    #             )
+    #             # logger.info(f"available balance: {available_balance}")
+    #
+    #             # 4) now loop each position for liq-price updates and possible liquidation
+    #             to_liquidate = []
+    #             for pos in positions:
+    #
+    #                 free_margin_for_pos = available_balance + pos['margin']
+    #
+    #                 current = price_cache[pos['symbol']]
+    #                 new_liq = compute_cross_liq_price(
+    #                     entry_price = pos['entry_price'],
+    #                     amount = pos['amount'],
+    #                     leverage = pos['leverage'],
+    #                     available_balance = free_margin_for_pos,
+    #                     side = pos['side']
+    #                     # ..maintenance params
+    #                 )
+    #                 if should_liquidate(pos['side'], current, new_liq):
+    #                     to_liquidate.append((pos, current))
+    #
+    #             # 2) liquidate them in one batch
+    #             # logger.info(f"to_liquidate: {to_liquidate}")
+    #             for pos, exit_price in to_liquidate:
+    #                 # a) close the old position
+    #                 cursor.execute("""
+    #                     UPDATE mocktrade.position_history
+    #                     SET status = 2
+    #                     WHERE id = %s
+    #                 """, (pos['id'],))
+    #
+    #                 # b) compute realized PnL on the fill
+    #                 pnl_liq = ((exit_price - pos['entry_price']) if pos['side'] == 'buy' else (pos['entry_price'] - exit_price)) * pos['amount']
+    #
+    #                 # c) insert the liquidation record (status = 4)
+    #                 cursor.execute("""
+    #                     INSERT INTO mocktrade.position_history (
+    #                       user_id, symbol, size, amount, entry_price,
+    #                       liq_price, margin,  pnl,
+    #                       margin_type, side, leverage, status, tp, sl, datetime, close_price
+    #                     ) VALUES (
+    #                       %s, %s, 0, 0, 0,
+    #                       0, 0, %s,
+    #                       %s, %s, %s, 4, %s, %s, %s, %s
+    #                     )
+    #                 """, (
+    #                         pos['user_id'], pos['symbol'], pnl_liq,
+    #                         pos['margin_type'], pos['side'], pos['leverage'],
+    #                         pos['tp'], pos['sl'],
+    #                         datetime.now(timezone("Asia/Seoul")),
+    #                         exit_price
+    #                     ))
+    #
+    #                 # d) apply realized PnL to user's wallet balance
+    #                 cursor.execute("""
+    #                     UPDATE mocktrade.user
+    #                        SET balance = balance + %s
+    #                      WHERE id = %s
+    #                 """, (pnl_liq, pos['user_id']))
+    #
+    #                 # d) free its collateral and PnL back into our pool
+    #                 available_balance += pos['margin']
+    #                 logger.info(f"available balance after position liquidate: {available_balance}")
+    #
+    #                 liq_count += 1
+    #
+    #             # 3) remove them from your working list
+    #             remaining = [p for p in positions if p['id'] not in {p[0]['id'] for p in to_liquidate}]
+    #
+    #             # 4) final pass: update liq_price on survivors
+    #             for pos in remaining:
+    #
+    #                 free_margin_for_pos = available_balance + pos['margin']
+    #
+    #                 final_liq = compute_cross_liq_price(
+    #                     entry_price = pos['entry_price'],
+    #                     amount = pos['amount'],
+    #                     leverage = pos['leverage'],
+    #                     available_balance = free_margin_for_pos,
+    #                     side = pos['side']
+    #                     # ..maintenance params
+    #                 )
+    #                 if final_liq != pos['liq_price']:
+    #                     cursor.execute("""
+    #                         UPDATE mocktrade.position_history
+    #                         SET liq_price = %s
+    #                         WHERE id = %s
+    #                     """, (final_liq, pos['id']))
+    #
+    #                 row_count += 1
+    #
+    #         conn.commit()
+    #         return {
+    #             "row_count" : row_count,
+    #             "liq_count" : liq_count
+    #         }
+    #     except Exception:
+    #         logger.exception("Failed to calculate cross_positions")
+    #         if conn:
+    #             conn.rollback()
+    #     finally:
+    #         if cursor:
+    #             try: cursor.close()
+    #             except: pass
+    #         if conn:
+    #             try: conn.close()
+    #             except: pass
+
     def liquidate_cross_positions(self):
         conn = None
         cursor = None
@@ -890,18 +1056,17 @@ class MySQLAdapter:
             cursor.execute("""
                 SELECT * 
                   FROM mocktrade.position_history
-                 WHERE margin_type = 'cross'
-                   AND status = 1
+                 WHERE status = 1
             """)
             rows = cursor.fetchall()
 
             # 2) group them by user_id
-            cross_by_user = defaultdict(list)
+            positions_by_user = defaultdict(list)
             for row in rows:
-                cross_by_user[row['user_id']].append(row)
+                positions_by_user[row['user_id']].append(row)
 
             # 3) iterate each user's bucket
-            for user_id, positions in cross_by_user.items():
+            for user_id, positions in positions_by_user.items():
                 # — a) wallet balance
                 cursor.execute("""
                     SELECT balance
@@ -912,8 +1077,8 @@ class MySQLAdapter:
                 """, (user_id,))
                 wallet_balance = cursor.fetchone()['balance'] or 0
 
-                # — b) frozen margin from these cross positions
-                cross_position_margin = sum(p['margin'] for p in positions)
+                # — b) frozen margin isolated positions
+                iso_initial = sum(p['margin'] for p in positions if p['margin_type'] == 'isolated')
 
                 # — c) frozen margin from pending cross orders
                 cursor.execute("""
@@ -927,34 +1092,35 @@ class MySQLAdapter:
                 order_margin = cursor.fetchone()['frozen'] or 0
 
                 # — d) unrealized PnL from these cross positions
-                unrealized_pnl = sum(p['unrealized_pnl'] for p in positions)
+                unrealized_pnl = sum(p['unrealized_pnl'] for p in positions if p['margin_type'] == 'cross')
 
-                # — e) compute available balance
-                available_balance = (
-                        wallet_balance
-                        - cross_position_margin
-                        - order_margin
-                        + unrealized_pnl
-                )
-                # logger.info(f"available balance: {available_balance}")
+                # — e) compute cross_equity
+                cross_equity = (wallet_balance - iso_initial - order_margin + unrealized_pnl)
 
                 # 4) now loop each position for liq-price updates and possible liquidation
+                cross_positions = [p for p in positions if p['margin_type'] == 'cross']
                 to_liquidate = []
-                for pos in positions:
-                    current = price_cache[pos['symbol']]
+
+                # 4-a) 청산 대상 탐색
+                for pos in cross_positions:
+                    maint_other = sum(
+                        p['entry_price'] * p['amount'] * 0.005 for p in cross_positions if p is not pos
+                    )
+                    buffer_for_pos = cross_equity - maint_other
                     new_liq = compute_cross_liq_price(
                         entry_price = pos['entry_price'],
                         amount = pos['amount'],
                         leverage = pos['leverage'],
-                        available_balance = available_balance,
+                        available_balance = buffer_for_pos,
                         side = pos['side']
                         # ..maintenance params
                     )
-                    if should_liquidate(pos['side'], current, new_liq):
-                        to_liquidate.append((pos, current))
+                    current_price = price_cache[pos['symbol']]
 
-                # 2) liquidate them in one batch
-                # logger.info(f"to_liquidate: {to_liquidate}")
+                    if should_liquidate(pos['side'], current_price, new_liq):
+                        to_liquidate.append((pos, current_price))
+
+                # 4-b) 일괄 청산
                 for pos, exit_price in to_liquidate:
                     # a) close the old position
                     cursor.execute("""
@@ -978,12 +1144,12 @@ class MySQLAdapter:
                           %s, %s, %s, 4, %s, %s, %s, %s
                         )
                     """, (
-                            pos['user_id'], pos['symbol'], pnl_liq,
-                            pos['margin_type'], pos['side'], pos['leverage'],
-                            pos['tp'], pos['sl'],
-                            datetime.now(timezone("Asia/Seoul")),
-                            exit_price
-                        ))
+                        pos['user_id'], pos['symbol'], pnl_liq,
+                        pos['margin_type'], pos['side'], pos['leverage'],
+                        pos['tp'], pos['sl'],
+                        datetime.now(timezone("Asia/Seoul")),
+                        exit_price
+                    ))
 
                     # d) apply realized PnL to user's wallet balance
                     cursor.execute("""
@@ -992,22 +1158,22 @@ class MySQLAdapter:
                          WHERE id = %s
                     """, (pnl_liq, pos['user_id']))
 
-                    # d) free its collateral and PnL back into our pool
-                    available_balance += pos['margin']
-                    logger.info(f"available balance after position liquidate: {available_balance}")
+
 
                     liq_count += 1
 
-                # 3) remove them from your working list
-                remaining = [p for p in positions if p['id'] not in {p[0]['id'] for p in to_liquidate}]
+                # 5) survivors 업데이트
+                remaining = [p for p in cross_positions if p['id'] not in {c[0]['id'] for c in to_liquidate}]
 
-                # 4) final pass: update liq_price on survivors
                 for pos in remaining:
+                    maint_other = sum(p['entry_price'] * p['amount'] * 0.005 for p in remaining if p is not pos)
+                    buffer_for_pos = cross_equity - maint_other
+
                     final_liq = compute_cross_liq_price(
                         entry_price = pos['entry_price'],
                         amount = pos['amount'],
                         leverage = pos['leverage'],
-                        available_balance = available_balance,
+                        available_balance = buffer_for_pos,
                         side = pos['side']
                         # ..maintenance params
                     )
@@ -1036,4 +1202,3 @@ class MySQLAdapter:
             if conn:
                 try: conn.close()
                 except: pass
-
