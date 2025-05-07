@@ -42,27 +42,26 @@ def calculate_new_position(current_position, order):
     cur_size = float(current_position['size'])
     cur_lev = float(current_position['leverage'])
 
-    # 2) Liquidation check
-    liq_price = float(current_position['liq_price'])
-    if (cs == 'buy' and price <= liq_price) or \
-            (cs == 'sell' and price >= liq_price):
-        # forced liquidation
-        return {
-            "user_id": user_id,
-            "symbol": symbol,
-            "amount": 0,
-            "entry_price": None,
-            "size": 0,
-            "margin": 0,
-            "leverage": cur_lev,
-            "side": cs,
-            "margin_type": margin_type,
-            "pnl": -cur_margin,
-            "status": 4,
-            "liq_price": None,
-            "close_price": price,
-            "close": True
-        }
+    # # 2) Liquidation check
+    # liq_price = float(current_position['liq_price'])
+    # if (cs == 'buy' and price <= liq_price) or (cs == 'sell' and price >= liq_price):
+    #     # forced liquidation
+    #     return {
+    #         "user_id": user_id,
+    #         "symbol": symbol,
+    #         "amount": 0,
+    #         "entry_price": None,
+    #         "size": 0,
+    #         "margin": 0,
+    #         "leverage": cur_lev,
+    #         "side": cs,
+    #         "margin_type": margin_type,
+    #         "pnl": -cur_margin,
+    #         "status": 4,
+    #         "liq_price": None,
+    #         "close_price": price,
+    #         "close": True
+    #     }
 
     # decide how much to close
     close_amt = cur_amt if not from_order else min(amount, cur_amt)
