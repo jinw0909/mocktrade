@@ -182,26 +182,26 @@ def calculate_position(current_position, order):
             "liq_price": liq_price
         }
 
-    ci = float(current_position['liq_price'])
-    cs = current_position['side']
-    if (cs == 'buy' and price <= ci) or (cs == 'sell' and price >= ci):
-        # return a force liquidation result immediately
-        return {
-            "user_id": current_position['user_id'],
-            "symbol": current_position['symbol'],
-            "amount": 0,
-            "entry_price": None,
-            "size": 0,
-            "margin": 0,
-            "leverage": float(current_position['leverage']),
-            "side": cs,
-            "margin_type": current_position['margin_type'],
-            "pnl": -float(current_position['margin']),
-            "status": 4,
-            "liq_price": None,
-            "close_price": price,
-            "close": True
-        }
+    # ci = float(current_position['liq_price'])
+    # cs = current_position['side']
+    # if (cs == 'buy' and price <= ci) or (cs == 'sell' and price >= ci):
+    #     # return a force liquidation result immediately
+    #     return {
+    #         "user_id": current_position['user_id'],
+    #         "symbol": current_position['symbol'],
+    #         "amount": 0,
+    #         "entry_price": None,
+    #         "size": 0,
+    #         "margin": 0,
+    #         "leverage": float(current_position['leverage']),
+    #         "side": cs,
+    #         "margin_type": current_position['margin_type'],
+    #         "pnl": -float(current_position['margin']),
+    #         "status": 4,
+    #         "liq_price": None,
+    #         "close_price": price,
+    #         "close": True
+    #     }
 
     # Existing position details
     current_side = current_position['side']
