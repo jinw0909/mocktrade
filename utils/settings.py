@@ -515,8 +515,8 @@ class MySQLAdapter:
                     side,
                     0,
                     new_status,
-                    None,
-                    None,
+                    0,
+                    0,
                     datetime.now(timezone('Asia/Seoul')),
                     current_price
                 ))
