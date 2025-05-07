@@ -73,10 +73,16 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
 
             if updates:
                 total_pnl = sum(item["pnl"] for item in updates)
-                await websocket.send_json({
-                    "data": updates,
-                    "total": total_pnl
-                })
+                try:
+                    await websocket.send_json({
+                        "data": updates,
+                        "total": total_pnl
+                    })
+
+                except (WebSocketDisconnect, RuntimeError) as e:
+                    # client hang up
+                    logger.info(f"Socket closed for user {user_id} : {e!r}, stopping PnL loop")
+                    break
 
             await asyncio.sleep(1.0)
 

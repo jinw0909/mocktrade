@@ -1,6 +1,11 @@
+import logging
+
 from fastapi import WebSocket
 from typing import Dict, List
 from fastapi.encoders import jsonable_encoder
+from starlette.websockets import WebSocketDisconnect
+
+logger = logging.getLogger("connection_manager")
 
 class ConnectionManager:
     def __init__(self):
@@ -21,8 +26,16 @@ class ConnectionManager:
     async def notify_user(self, user_id: str, message: dict):
         """Send a JSON message to every WS for that user"""
         payload = jsonable_encoder(message)
-        for ws in self.active.get(user_id, []):
-            await ws.send_json(payload)
+        for ws in list(self.active.get(user_id, [])):
+            try:
+                await ws.send_json(payload)
+            except (WebSocketDisconnect, RuntimeError) as e:
+                logger.info(f"[notify_user] socket closed for {user_id}: {e!r}, removing it")
+                self.disconnect(user_id, ws)
+            except Exception:
+                logger.exception(f"[notify_user] unexpected error for {user_id}, removing socket")
+                self.disconnect(user_id, ws)
+
 
 # make a single shared instance
 manager = ConnectionManager()

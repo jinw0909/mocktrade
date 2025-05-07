@@ -154,11 +154,11 @@ def calculate_position(current_position, order):
     # case 1. No current position -> create new
     if not current_position:
         logger.info("case 1, no current position")
-        liq_price = calc_iso_liq_price(
-            price,
-            leverage,
-            side
-        )
+        # liq_price = calc_iso_liq_price(
+        #     price,
+        #     leverage,
+        #     side
+        # )
         liq_price = calc_iso_liq_price_from_margin(
             price,  # entry_price
             order_margin,  # margin
@@ -515,7 +515,7 @@ class TradingService(MySQLAdapter):
                     new_position.get('margin_ratio'), new_position.get('margin'),
                     new_position.get('pnl'), new_position.get('margin_type'),
                     new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
-                    new_position.get('tp'), new_position.get('sl'), datetime.now(timezone("Asia/Seoul")),
+                    new_position.get('tp', 0), new_position.get('sl', 0), datetime.now(timezone("Asia/Seoul")),
                     new_position.get('close_price')
                 ))
                 # update the old positions to status 2
@@ -1103,7 +1103,7 @@ class TradingService(MySQLAdapter):
                     new_position.get('margin'),
                     new_position.get('pnl'), new_position.get('margin_type'),
                     new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
-                    new_position.get('tp'), new_position.get('sl'), datetime.now(timezone("Asia/Seoul")),
+                    new_position.get('tp', 0), new_position.get('sl', 0), datetime.now(timezone("Asia/Seoul")),
                     new_position.get('close_price')
                 ))
 
