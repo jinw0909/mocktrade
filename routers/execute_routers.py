@@ -374,7 +374,7 @@ async def api_liquidateCross():
         logger.info(f"number of positions liquidated: {liq_count}, number of rows updated with liq_price: {row_count}")
         return {"number of liquidated cross positions": liq_count, "number of rows updated with liq_price" : row_count }
     except Exception:
-        logger.exception("")
+        logger.exception("Error while liquidating cross positions")
 
 
 @router.post('/calculate_upnl', summary='calculate unrealized pnl of active positions', tags=['EXECUTE API'])

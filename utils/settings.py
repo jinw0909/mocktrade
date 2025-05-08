@@ -44,45 +44,17 @@ logger = logging.getLogger("uvicorn")
 def compute_cross_liq_price(
         entry_price: float,
         amount: float,
-        leverage: float,
-        available_balance: float,
+        buffer: float,
         side: str
 ) -> float:
-    """
-    Compute the cross-margin liquidation price for a single position,
-    using a fixed 0.5% maintenance margin
-
-    Args:
-        entry_price: the fill price of the position
-        amount: number of coins/contracts
-        leverage: the leverage factor
-        available_balance: current free cross-margin balance
-        side: 'buy' for long, 'sell' for short
-
-    Returns:
-        liq_price: the price at which this position would be liquidated
-    """
-    # fixed 0.5% maintenance rate
-    maintenance_margin_rate = 0.005
-
-    # 1) Notional value of the position
-    notional = entry_price * amount
-
-    # 2) Maintenance margin requirement (the collateral buffer)
-    maint_margin = notional * maintenance_margin_rate
-
-    # 3) Solve for the price at which equity == maintenance margin
-    # Equity = available_balance + (P_liq - entry) * amount  for longs
-    # Equity  =available_balance + (entry - P_liq) * amount  for shorts
+    maintenance_rate = 0.01
+    # 3) Solve for the price at which equity == 0
     if side == 'buy':
         # long -> liquidate when price falls to this level
-        liq = (maint_margin - available_balance) / amount + entry_price
+        return max((entry_price - buffer / amount) / (1 - maintenance_rate), 0.0)
     else:
         # short -> liquidate when price rises to this level
-        liq = entry_price - (maint_margin - available_balance) / amount
-
-    # prices cannot go below zero
-    return max(liq, 0.0)
+        return max((entry_price + buffer / amount) / ( 1 + maintenance_rate), 0.0)
 
 
 def should_liquidate(
@@ -477,12 +449,12 @@ class MySQLAdapter:
                     raw_pnl = (entry_price - current_price) * amount
 
                 # 3a. forced-liquidation guard: cap losses at -margin
-                if raw_pnl <= -margin:
-                    derived_pnl = -margin
-                    new_status = 4
-                else:
-                    derived_pnl = raw_pnl
-                    new_status = 3
+                # if raw_pnl <= -margin:
+                #     derived_pnl = -margin
+                #     new_status = 4
+                # else:
+                #     derived_pnl = raw_pnl
+                #     new_status = 3
 
                 # 4. Mark position as closed (insert new position)
                 cursor.execute("""
@@ -493,33 +465,44 @@ class MySQLAdapter:
                     AND symbol = %s
                 """, (user_id, symbol))
 
-                insert_sql = """
-                    INSERT INTO mocktrade.position_history (
-                        user_id, symbol, size, amount, entry_price, liq_price,
-                        margin, pnl, margin_type, side, leverage, status, tp, sl, `datetime`, close_price
-                    ) VALUES (
-                        %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-                    )
-                """
-                cursor.execute(insert_sql, (
-                    user_id,
-                    symbol,
-                    0,
-                    0,
-                    entry_price,
-                    None,
-                    0,
-                    derived_pnl,
-                    margin_type,
-                    side,
-                    0,
-                    new_status,
-                    0,
-                    0,
-                    datetime.now(timezone('Asia/Seoul')),
-                    current_price
+                cursor.execute("""
+                    UPDATE mocktrade.position_history
+                       SET status = 3,
+                           pnl = %s,
+                           `datetime` = %s,
+                           close_price = %s 
+                     WHERE `id` = %s
+                """, (
+                    raw_pnl, datetime.now(timezone("Asia/Seoul")), current_price, position_id
                 ))
+
+                # insert_sql = """
+                #     INSERT INTO mocktrade.position_history (
+                #         user_id, symbol, size, amount, entry_price, liq_price,
+                #         margin, pnl, margin_type, side, leverage, status, tp, sl, `datetime`, close_price
+                #     ) VALUES (
+                #         %s, %s, %s, %s, %s, %s,
+                #         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                #     )
+                # """
+                # cursor.execute(insert_sql, (
+                #     user_id,
+                #     symbol,
+                #     0,
+                #     0,
+                #     entry_price,
+                #     None,
+                #     0,
+                #     raw_pnl,
+                #     margin_type,
+                #     side,
+                #     0,
+                #     3,
+                #     0,
+                #     0,
+                #     datetime.now(timezone('Asia/Seoul')),
+                #     current_price
+                # ))
 
                 # update_sql = """
                 #     UPDATE mocktrade.position_history
@@ -533,6 +516,7 @@ class MySQLAdapter:
                     WHERE `type` IN ('tp', 'sl')
                     AND `user_id` = %s
                     AND `symbol` = %s
+                    AND `status` = 0
                 """
 
                 cursor.execute(update_sql, (user_id, symbol))
@@ -545,7 +529,7 @@ class MySQLAdapter:
                 cursor.execute(balance_sql, (user_id,))
                 balance_result = cursor.fetchone()
                 current_balance = float(balance_result["balance"])
-                new_balance = current_balance + derived_pnl
+                new_balance = current_balance + raw_pnl
 
                 update_balance_sql = """
                     UPDATE mocktrade.user 
@@ -558,7 +542,7 @@ class MySQLAdapter:
 
             return {
                 "message": "Position closed with PnL calculation",
-                "derived_pnl": derived_pnl,
+                "derived_pnl": raw_pnl,
                 "updated_balance": new_balance,
                 "user_id": user_id,
                 "symbol": symbol,
@@ -720,7 +704,7 @@ class MySQLAdapter:
                     margin = float(pos['margin'])
                     close_pnl = -margin  # isolated -> full margin loss
 
-                    # a) mark the old position snapshot as "closed"
+                    # a) mark the old position snapshots as "closed"
                     cursor.execute("""
                         UPDATE mocktrade.position_history
                         SET status = 2
@@ -730,29 +714,41 @@ class MySQLAdapter:
                     """, (symbol, user_id))
 
                     # b) insert a new "liquidation" record
+                    # cursor.execute("""
+                    #     INSERT INTO mocktrade.position_history (
+                    #         user_id, symbol, size, amount, entry_price,
+                    #         liq_price, margin, pnl, margin_type,
+                    #         side, leverage, status, datetime, close_price
+                    #     ) VALUES (
+                    #         %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                    #     )
+                    # """, (
+                    #     user_id,
+                    #     symbol,
+                    #     0,
+                    #     0,
+                    #     None,
+                    #     None,
+                    #     0,
+                    #     close_pnl,  # realized PnL: full margin loss
+                    #     pos['margin_type'],
+                    #     side,
+                    #     pos['leverage'],
+                    #     3,  # liquidated
+                    #     datetime.now(timezone('Asia/Seoul')),
+                    #     current_price  # price at which it was liquidated
+                    # ))
+
+                    # b) update position status to liquidated
                     cursor.execute("""
-                        INSERT INTO mocktrade.position_history (
-                            user_id, symbol, size, amount, entry_price,
-                            liq_price, margin, pnl, margin_type,
-                            side, leverage, status, datetime, close_price
-                        ) VALUES (
-                            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
-                        )
+                        UPDATE mocktrade.position_history
+                           SET pnl = %,
+                               close_price = %s,
+                               status = 3,
+                               `datetime` = %s
+                         WHERE `id` = %s
                     """, (
-                        user_id,
-                        symbol,
-                        0,
-                        0,
-                        None,
-                        None,
-                        0,
-                        close_pnl,  # realized PnL: full margin loss
-                        pos['margin_type'],
-                        side,
-                        pos['leverage'],
-                        4,  # liquidated
-                        datetime.now(timezone('Asia/Seoul')),
-                        current_price  # price at which it was liquidated
+                        close_pnl, liq_price, datetime.now(), pos_id
                     ))
 
                     # c) debit the user's wallet by the lost margin
@@ -1064,7 +1060,6 @@ class MySQLAdapter:
             positions_by_user = defaultdict(list)
             for row in rows:
                 positions_by_user[row['user_id']].append(row)
-
             # 3) iterate each user's bucket
             for user_id, positions in positions_by_user.items():
                 # — a) wallet balance
@@ -1095,7 +1090,7 @@ class MySQLAdapter:
                 unrealized_pnl = sum(p['unrealized_pnl'] for p in positions if p['margin_type'] == 'cross')
 
                 # — e) compute cross_equity
-                cross_equity = (wallet_balance - iso_initial - order_margin + unrealized_pnl)
+                cross_equity = (wallet_balance - iso_initial - order_margin)
 
                 # 4) now loop each position for liq-price updates and possible liquidation
                 cross_positions = [p for p in positions if p['margin_type'] == 'cross']
@@ -1104,21 +1099,24 @@ class MySQLAdapter:
                 # 4-a) 청산 대상 탐색
                 for pos in cross_positions:
                     maint_other = sum(
-                        p['entry_price'] * p['amount'] * 0.005 for p in cross_positions if p is not pos
+                        p['entry_price'] * p['amount'] * 0.01 for p in cross_positions if p is not pos
                     )
-                    buffer_for_pos = cross_equity - maint_other
+                    unrealized_pnl = sum(
+                        p['unrealized_pnl'] for p in cross_positions if p is not pos
+                    )
+                    buffer_for_pos = cross_equity - maint_other + unrealized_pnl
                     new_liq = compute_cross_liq_price(
                         entry_price = pos['entry_price'],
                         amount = pos['amount'],
-                        leverage = pos['leverage'],
-                        available_balance = buffer_for_pos,
+                        buffer = buffer_for_pos,
                         side = pos['side']
                         # ..maintenance params
                     )
                     current_price = price_cache[pos['symbol']]
 
                     if should_liquidate(pos['side'], current_price, new_liq):
-                        to_liquidate.append((pos, current_price))
+                        # to_liquidate.append((pos, current_price))
+                        to_liquidate.append((pos, new_liq))
 
                 # 4-b) 일괄 청산
                 for pos, exit_price in to_liquidate:
@@ -1126,29 +1124,44 @@ class MySQLAdapter:
                     cursor.execute("""
                         UPDATE mocktrade.position_history
                         SET status = 2
-                        WHERE id = %s    
-                    """, (pos['id'],))
+                        WHERE symbol = %s AND user_id = %s AND status = 2    
+                    """, (pos['id'], pos['user_id']))
 
                     # b) compute realized PnL on the fill
                     pnl_liq = ((exit_price - pos['entry_price']) if pos['side'] == 'buy' else (pos['entry_price'] - exit_price)) * pos['amount']
 
-                    # c) insert the liquidation record (status = 4)
+                    # # c) insert the liquidation record (status = 4)
+                    # cursor.execute("""
+                    #     INSERT INTO mocktrade.position_history (
+                    #       user_id, symbol, size, amount, entry_price,
+                    #       liq_price, margin,  pnl,
+                    #       margin_type, side, leverage, status, tp, sl, datetime, close_price
+                    #     ) VALUES (
+                    #       %s, %s, 0, 0, 0,
+                    #       0, 0, %s,
+                    #       %s, %s, %s, 3, %s, %s, %s, %s
+                    #     )
+                    # """, (
+                    #     pos['user_id'], pos['symbol'], pnl_liq,
+                    #     pos['margin_type'], pos['side'], pos['leverage'],
+                    #     pos['tp'], pos['sl'],
+                    #     datetime.now(timezone("Asia/Seoul")),
+                    #     exit_price,
+                    # ))
+
+                    # c) update the position to liquidated
                     cursor.execute("""
-                        INSERT INTO mocktrade.position_history (
-                          user_id, symbol, size, amount, entry_price,
-                          liq_price, margin,  pnl,
-                          margin_type, side, leverage, status, tp, sl, datetime, close_price
-                        ) VALUES (
-                          %s, %s, 0, 0, 0,
-                          0, 0, %s,
-                          %s, %s, %s, 4, %s, %s, %s, %s
-                        )
+                        UPDATE mocktrade.position_history
+                           SET pnl = %s,
+                               datetime = %s,
+                               close_price = %s,
+                               status = 3
+                         WHERE `id` = %s
                     """, (
-                        pos['user_id'], pos['symbol'], pnl_liq,
-                        pos['margin_type'], pos['side'], pos['leverage'],
-                        pos['tp'], pos['sl'],
+                        pnl_liq,
                         datetime.now(timezone("Asia/Seoul")),
-                        exit_price
+                        exit_price,
+                        pos['id']
                     ))
 
                     # d) apply realized PnL to user's wallet balance
@@ -1158,7 +1171,7 @@ class MySQLAdapter:
                          WHERE id = %s
                     """, (pnl_liq, pos['user_id']))
 
-
+                    cross_equity + pos['unrealized_pnl']
 
                     liq_count += 1
 
@@ -1166,16 +1179,15 @@ class MySQLAdapter:
                 remaining = [p for p in cross_positions if p['id'] not in {c[0]['id'] for c in to_liquidate}]
 
                 for pos in remaining:
-                    maint_other = sum(p['entry_price'] * p['amount'] * 0.005 for p in remaining if p is not pos)
-                    buffer_for_pos = cross_equity - maint_other
+                    maint_other = sum(p['entry_price'] * p['amount'] * 0.01 for p in remaining if p is not pos)
+                    unrealized_pnl = sum(p['unrealized_pnl'] for p in remaining if p is not pos)
+                    buffer_for_pos = cross_equity - maint_other + unrealized_pnl
 
                     final_liq = compute_cross_liq_price(
                         entry_price = pos['entry_price'],
                         amount = pos['amount'],
-                        leverage = pos['leverage'],
-                        available_balance = buffer_for_pos,
+                        buffer = buffer_for_pos,
                         side = pos['side']
-                        # ..maintenance params
                     )
                     if final_liq != pos['liq_price']:
                         cursor.execute("""
