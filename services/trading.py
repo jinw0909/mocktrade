@@ -112,6 +112,8 @@ def calculate_new_position(current_position, order):
         cs
     )
 
+    new_liq = 0 if margin_type == 'cross' else new_liq
+
     return {
         "user_id": user_id,
         "symbol": symbol,
@@ -650,7 +652,7 @@ class TradingService(MySQLAdapter):
                             symbol,
                             'tp',
                             margin_type,
-                            margin,
+                            exec_margin,
                             leverage,
                             order_side,
                             limit_amount,
@@ -674,7 +676,7 @@ class TradingService(MySQLAdapter):
                             symbol,
                             'sl',
                             margin_type,
-                            margin,
+                            exec_margin,
                             leverage,
                             order_side,
                             limit_amount,
