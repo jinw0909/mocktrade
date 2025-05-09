@@ -24,6 +24,7 @@ def calculate_new_position(current_position, order):
     leverage = float(order['leverage'])
     margin_type = order['margin_type']
     from_order = bool(order['from_order'])
+    logger.info(f"from order {from_order} (tpsl order id = {order['id']}")
 
     # formatting precision
     prec = SYMBOL_CFG.get(symbol, {"price": 2, "qty": 3})
@@ -65,7 +66,7 @@ def calculate_new_position(current_position, order):
 
     # decide how much to close
     close_amt = cur_amt if not from_order else min(amount, cur_amt)
-
+    logger.info(f"close_amt: {close_amt}")
     # compute PnL for the closed portion
     if cs == 'buy':
         raw_pnl = (price - cur_price) * close_amt
@@ -121,11 +122,12 @@ def calculate_new_position(current_position, order):
         "leverage": leverage,
         "side": cs,
         "margin_type": margin_type,
-        "pnl": round(net_pnl, PRICE_DP),  # unrealized remains zero until closed
+        "pnl": 0,  # unrealized remains zero until closed
         "close_pnl": round(net_pnl, PRICE_DP),
         "status": 1,
         "liq_price": round(new_liq, PRICE_DP),
-        "close_price": price
+        "close_price": price,
+        "partial": True
     }
 
 
@@ -294,13 +296,14 @@ def calculate_position(current_position, order):
             "leverage": current_size / current_margin if current_margin else leverage,
             "side": current_side,
             "margin_type": margin_type,
-            "pnl": round(net_close, PRICE_DP),
+            "pnl": 0,
             "close_pnl": round(net_close, PRICE_DP),
             "status": 1,
             "liq_price": round(liq_price, PRICE_DP),
             "tp": current_tp,
             "sl": current_sl,
-            "close_price": round(price, PRICE_DP)
+            "close_price": round(price, PRICE_DP),
+            "partial": True
         }
 
     elif amount == current_amount:
@@ -530,11 +533,24 @@ class TradingService(MySQLAdapter):
                         new_position.get('margin_ratio'), new_position.get('margin'),
                         new_position.get('pnl', 0), new_position.get('margin_type'),
                         new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
-                        new_position.get('tp', 0), new_position.get('sl', 0), datetime.now(timezone("Asia/Seoul")),
+                        new_position.get('tp'), new_position.get('sl'), datetime.now(timezone("Asia/Seoul")),
                         new_position.get('close_price')
                     ))
 
-                else:
+                elif new_position.get('partial'):
+                    cursor.execute("""
+                        UPDATE mocktrade.position_history
+                           SET pnl = %s,
+                               `datetime` = %s,
+                               `close_price` = %s
+                         WHERE `id` = %s
+                    """, (
+                        new_position.get('close_pnl', 0),
+                        datetime.now(timezone('Asia/Seoul')),
+                        new_position.get('close_price'),
+                        current_position['id']
+                    ))
+
                     insert_sql = """
                       INSERT INTO mocktrade.position_history
                        (user_id, symbol, size, amount, entry_price,
@@ -549,7 +565,26 @@ class TradingService(MySQLAdapter):
                         new_position.get('margin_ratio'), new_position.get('margin'),
                         new_position.get('pnl', 0), new_position.get('margin_type'),
                         new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
-                        new_position.get('tp', 0), new_position.get('sl', 0), datetime.now(timezone("Asia/Seoul")),
+                        new_position.get('tp'), new_position.get('sl'), datetime.now(timezone("Asia/Seoul")),
+                        0
+                    ))
+
+                else:  # same side or new position
+                    insert_sql = """
+                      INSERT INTO mocktrade.position_history
+                       (user_id, symbol, size, amount, entry_price,
+                        liq_price, margin_ratio, margin, pnl,
+                        margin_type, side, leverage, status, tp, sl, datetime, close_price)
+                      VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    """
+                    cursor.execute(insert_sql, (
+                        new_position.get('user_id'), new_position.get('symbol'),
+                        new_position.get('size'), new_position.get('amount'),
+                        new_position.get('entry_price'), new_position.get('liq_price'),
+                        new_position.get('margin_ratio'), new_position.get('margin'),
+                        new_position.get('pnl', 0), new_position.get('margin_type'),
+                        new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
+                        new_position.get('tp'), new_position.get('sl'), datetime.now(timezone("Asia/Seoul")),
                         new_position.get('close_price')
                     ))
 
@@ -1120,11 +1155,31 @@ class TradingService(MySQLAdapter):
                         UPDATE mocktrade.position_history
                            SET pnl = %s,
                                close_price = %s,
-                               status = 3
+                               status = 3,
+                               `datetime` = %s
                          WHERE `id` = %s   
-                    """, (new_position.get('pnl', 0), new_position.get('close_price', 0), current_position.get('id')))
+                    """, (
+                        new_position.get('close_pnl', 0),
+                        new_position.get('close_price', 0),
+                        datetime.now(timezone('Asia/Seoul')),
+                        current_position.get('id')
+                    ))
                 else:
-                    # logger.info("inserting a new position status at the tip of the table")
+                    # partial close
+                    cursor.execute("""
+                        UPDATE mocktrade.position_history
+                           SET pnl = %s,
+                               close_price = %s,
+                               status = 2,
+                               `datetime` = %s
+                         WHERE `id` = %s
+                    """, (
+                        new_position.get('close_pnl', 0),
+                        new_position.get('close_price', 0),
+                        datetime.now(timezone('Asia/Seoul')),
+                        current_position.get('id')
+                    ))
+
                     cursor.execute("""
                         INSERT INTO mocktrade.position_history (
                             user_id, symbol, size, amount, entry_price,
@@ -1140,10 +1195,10 @@ class TradingService(MySQLAdapter):
                         new_position.get('size'), new_position.get('amount'),
                         new_position.get('entry_price'), new_position.get('liq_price'),
                         new_position.get('margin'),
-                        new_position.get('pnl'), new_position.get('margin_type'),
+                        new_position.get('pnl', 0), new_position.get('margin_type'),
                         new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
                         new_position.get('tp', 0), new_position.get('sl', 0), datetime.now(timezone("Asia/Seoul")),
-                        new_position.get('close_price')
+                        0
                     ))
 
                 # 5) Update wallet for any realized pnl
