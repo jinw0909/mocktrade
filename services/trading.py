@@ -607,7 +607,7 @@ class TradingService(MySQLAdapter):
                     SET status = 1,
                         po_id = %s
                     WHERE `id` = %s
-                """, (current_position.get('id'), order_id,))
+                """, ((current_position or {}).get('id'), order_id,))
 
                 # 7) close relevant tp/sl orders
                 # if the position being closed, close all the related tp/sl orders
@@ -662,7 +662,7 @@ class TradingService(MySQLAdapter):
                                 user_id, symbol, `type`, margin_type, magin, leverage, side, amount, status
                                 ,insert_time, update_time, sl, or_id )
                             VALUES (
-                                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s )
+                                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s )
                         """, (
                             user_id,
                             symbol,
