@@ -500,6 +500,11 @@ class TradingService(MySQLAdapter):
                 # 3) Compute new_position
                 new_position = calculate_position(current_position, order)
 
+                if current_position:
+                    pos_id = current_position.get('id')
+                else:
+                    pos_id = None
+
                 # 4) Persist new position ( + close old ones )
                 cursor.execute("""
                     UPDATE mocktrade.position_history SET status = 2
@@ -518,7 +523,7 @@ class TradingService(MySQLAdapter):
                         new_position.get('close_pnl', 0),
                         datetime.now(timezone('Asia/Seoul')),
                         new_position.get('close_price', 0),
-                        current_position.get('id')
+                        pos_id
                     ))
 
                     insert_sql = """
@@ -550,7 +555,7 @@ class TradingService(MySQLAdapter):
                         new_position.get('close_pnl', 0),
                         datetime.now(timezone('Asia/Seoul')),
                         new_position.get('close_price'),
-                        current_position['id']
+                        pos_id
                     ))
 
                     insert_sql = """
@@ -601,13 +606,14 @@ class TradingService(MySQLAdapter):
                         (new_bal, user_id)
                     )
 
+
                 # 6) Mark order settled
                 cursor.execute("""
                     UPDATE mocktrade.order_history
                     SET status = 1,
                         po_id = %s
                     WHERE `id` = %s
-                """, ((current_position or {}).get('id'), order_id,))
+                """, (pos_id, order_id,))
 
                 # 7) close relevant tp/sl orders
                 # if the position being closed, close all the related tp/sl orders
