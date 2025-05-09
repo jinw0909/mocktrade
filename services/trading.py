@@ -460,20 +460,21 @@ class TradingService(MySQLAdapter):
                 exec_price = current_price
                 exec_amount = float(order['amount'])
                 leverage = float(order['leverage'])
-                # exec_margin = (exec_price * exec_amount) / leverage
+                exec_margin = (exec_price * exec_amount) / leverage
 
                 # 1-1) update the in-memory dict so calculate_positions sees real values
                 order['price'] = exec_price
-                # order['margin'] = exec_margin
+                order['margin'] = exec_margin
 
                 # 1-2) persist those execution values back to the order_history row
                 cursor.execute("""
                     UPDATE mocktrade.order_history
                        SET price = %s,
+                           magin = %s,
                            update_time = %s
                      WHERE id = %s
                 """, (
-                    exec_price, datetime.now(timezone("Asia/Seoul")), order_id
+                    exec_price, exec_margin, datetime.now(timezone("Asia/Seoul")), order_id
                 ))
 
                 # 2) Read balance & position
@@ -495,7 +496,6 @@ class TradingService(MySQLAdapter):
                 new_position = calculate_position(current_position, order)
 
                 # 4) Persist new position ( + close old ones )
-
                 cursor.execute("""
                     UPDATE mocktrade.position_history SET status = 2
                     WHERE `status` = 1 AND `user_id` = %s AND `symbol` = %s

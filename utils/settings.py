@@ -742,7 +742,7 @@ class MySQLAdapter:
                     # b) update position status to liquidated
                     cursor.execute("""
                         UPDATE mocktrade.position_history
-                           SET pnl = %,
+                           SET pnl = %s,
                                close_price = %s,
                                status = 3,
                                `datetime` = %s
