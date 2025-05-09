@@ -216,10 +216,10 @@ scheduler.add_job(
     id="orchestrator",
     replace_existing=True
 )
-
+interval_sec = int(config.get('SOCKET_INTERVAL'))
 scheduler.add_job(
     update_position_status_to_redis,
-    trigger=IntervalTrigger(seconds=config.get('SOCKET_INTERVAL')),
+    trigger=IntervalTrigger(seconds=interval_sec),
     next_run_time=datetime.now(),
     id="pnlCalculator",
     replace_existing=True
