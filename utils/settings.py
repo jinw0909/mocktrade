@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 
@@ -14,6 +15,8 @@ from pytz import timezone
 import pytz
 # from boto3 import client
 from base64 import b64decode
+
+from utils.connection_manager import manager
 from utils.make_error import MakeErrorType
 import pandas as pd
 from collections import defaultdict
@@ -666,6 +669,8 @@ class MySQLAdapter:
         cursor = None
         liquidated = 0
 
+        pending_notifs: list[tuple[str, dict]] = []
+
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -748,7 +753,7 @@ class MySQLAdapter:
                                `datetime` = %s
                          WHERE `id` = %s
                     """, (
-                        close_pnl, liq_price, datetime.now(), pos_id
+                        close_pnl, liq_price, datetime.now(timezone('Asia/Seoul')), pos_id
                     ))
 
                     # c) debit the user's wallet by the lost margin
@@ -768,9 +773,30 @@ class MySQLAdapter:
                         AND `type` IN ('tp', 'sl')    
                     """, (user_id, symbol))
 
+                    # e) get the retri_id of user
+                    cursor.execute("""
+                        SELECT retri_id FROM mocktrade.user
+                        WHERE `id` = %s
+                        AND `status` = 0
+                    """, (user_id,))
+
+                    retri_id = cursor.fetchone()['retri_id']
+
+                    pending_notifs.append((
+                        retri_id,
+                        {"trigger": "liquidation_cross", "position": pos}
+                    ))
+
+
                     liquidated += 1
 
             conn.commit()
+
+            for retri_id, message in pending_notifs:
+                # schedule on the same loop
+                asyncio.create_task(
+                    manager.notify_user(retri_id, message)
+                )
             return liquidated
 
         except Exception as e:
@@ -1044,6 +1070,8 @@ class MySQLAdapter:
         cursor = None
         row_count = 0
         liq_count = 0
+
+        pending_notifs : list[tuple[str, dict]] = []
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -1064,13 +1092,15 @@ class MySQLAdapter:
             for user_id, positions in positions_by_user.items():
                 # — a) wallet balance
                 cursor.execute("""
-                    SELECT balance
+                    SELECT balance, retri_id
                       FROM mocktrade.user
                      WHERE id     = %s
                        AND status = 0
                     LIMIT 1
                 """, (user_id,))
-                wallet_balance = cursor.fetchone()['balance'] or 0
+                user_row = cursor.fetchone()
+                wallet_balance = user_row['balance'] or 0
+                retri_id = user_row['retri_id']
 
                 # — b) frozen margin isolated positions
                 iso_initial = sum(p['margin'] for p in positions if p['margin_type'] == 'isolated')
@@ -1173,6 +1203,10 @@ class MySQLAdapter:
 
                     cross_equity + pos['unrealized_pnl']
 
+                    pending_notifs.append((
+                        retri_id,
+                        { "trigger" : "liquidation_cross", "pos": pos}))
+
                     liq_count += 1
 
                 # 5) survivors 업데이트
@@ -1199,6 +1233,10 @@ class MySQLAdapter:
                     row_count += 1
 
             conn.commit()
+            for user_id, message in pending_notifs:
+                asyncio.create_task(
+                    manager.notify_user(user_id, message)
+                )
             return {
                 "row_count" : row_count,
                 "liq_count" : liq_count

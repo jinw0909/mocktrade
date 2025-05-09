@@ -144,6 +144,8 @@ def calculate_position(current_position, order):
     price = float(order['price'])
     leverage = float(order['leverage'])
     margin_type = order['margin_type']
+    tp = order.get('tp')
+    sl = order.get('sl')
 
     #helper to round by symbol
     prec = SYMBOL_CFG.get(symbol, {"price": 2, "qty": 3})
@@ -374,8 +376,8 @@ def calculate_position(current_position, order):
             "status": 1,
             "opposite": True,
             "liq_price": round(liq_price, PRICE_DP),
-            "tp": None,
-            "sl": None,
+            "tp": tp,
+            "sl": sl,
             "close": True,
             "close_price": price
         }
@@ -483,7 +485,7 @@ class TradingService(MySQLAdapter):
                 # 2) Read balance & position
                 cursor.execute("SELECT balance, retri_id FROM `mocktrade`.`user` WHERE `id`= %s AND status = 0", (user_id,))
                 user_row = cursor.fetchone()
-                wallet_balance = user_row.get("balance")
+                wallet_balance = user_row.get("balance", 0)
                 retri_id = user_row.get("retri_id")
 
 
@@ -533,7 +535,7 @@ class TradingService(MySQLAdapter):
                         new_position.get('margin_ratio'), new_position.get('margin'),
                         new_position.get('pnl', 0), new_position.get('margin_type'),
                         new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
-                        new_position.get('tp'), new_position.get('sl'), datetime.now(timezone("Asia/Seoul")),
+                        new_position.get('tp', 0), new_position.get('sl', 0), datetime.now(timezone("Asia/Seoul")),
                         new_position.get('close_price')
                     ))
 
@@ -565,7 +567,7 @@ class TradingService(MySQLAdapter):
                         new_position.get('margin_ratio'), new_position.get('margin'),
                         new_position.get('pnl', 0), new_position.get('margin_type'),
                         new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
-                        new_position.get('tp'), new_position.get('sl'), datetime.now(timezone("Asia/Seoul")),
+                        new_position.get('tp', 0), new_position.get('sl', 0), datetime.now(timezone("Asia/Seoul")),
                         0
                     ))
 
@@ -584,7 +586,7 @@ class TradingService(MySQLAdapter):
                         new_position.get('margin_ratio'), new_position.get('margin'),
                         new_position.get('pnl', 0), new_position.get('margin_type'),
                         new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
-                        new_position.get('tp'), new_position.get('sl'), datetime.now(timezone("Asia/Seoul")),
+                        new_position.get('tp', 0), new_position.get('sl', 0), datetime.now(timezone("Asia/Seoul")),
                         new_position.get('close_price')
                     ))
 
@@ -600,11 +602,12 @@ class TradingService(MySQLAdapter):
                     )
 
                 # 6) Mark order settled
-                cursor.execute(
-                    "UPDATE mocktrade.order_history SET status = 1 WHERE id = %s",
-                    (order_id,)
-                )
-
+                cursor.execute("""
+                    UPDATE mocktrade.order_history
+                    SET status = 1,
+                        po_id = %s
+                    WHERE `id` = %s
+                """, (current_position.get('id'), order_id,))
 
                 # 7) close relevant tp/sl orders
                 # if the position being closed, close all the related tp/sl orders
@@ -624,21 +627,24 @@ class TradingService(MySQLAdapter):
                     limit_amount = order['amount']
                     limit_side = order['side']
                     leverage = order['leverage']
+                    margin_type = order['margin_type']
+                    margin = order['magin']
 
                     order_side = 'sell' if limit_side == 'buy' else 'buy'
 
                     if limit_tp:
                         cursor.execute("""
                             INSERT INTO mocktrade.order_history (
-                                user_id, symbol, `type`, margin_type, leverage, side, amount, status
+                                user_id, symbol, `type`, margin_type, magin, leverage, side, amount, status
                                 ,insert_time, update_time, tp, or_id )
                             VALUES (
-                                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s )
+                                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s )
                         """, (
                             user_id,
                             symbol,
                             'tp',
-                            'isolated',
+                            margin_type,
+                            margin,
                             leverage,
                             order_side,
                             limit_amount,
@@ -653,7 +659,7 @@ class TradingService(MySQLAdapter):
                     if limit_sl:
                         cursor.execute("""
                             INSERT INTO mocktrade.order_history (
-                                user_id, symbol, `type`, margin_type, leverage, side, amount, status
+                                user_id, symbol, `type`, margin_type, magin, leverage, side, amount, status
                                 ,insert_time, update_time, sl, or_id )
                             VALUES (
                                 %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s )
@@ -661,7 +667,8 @@ class TradingService(MySQLAdapter):
                             user_id,
                             symbol,
                             'sl',
-                            'isolated',
+                            margin_type,
+                            margin,
                             leverage,
                             order_side,
                             limit_amount,
@@ -1022,24 +1029,14 @@ class TradingService(MySQLAdapter):
         finally:
             conn.close()
 
-    # def settle_tpsl_orders(self):
-    #     # mysql = MySQLAdapter()
-    #     try:
-    #         with self._get_connection() as conn, conn.cursor() as cursor:
-    #
-    #             # cursor.execute("SELECT price, symbol FROM mocktrade.prices")
-    #             # price_dict = {r['symbol']: r['price'] for r in cursor.fetchall()}
-    #
-    #             count = self.execute_tpsl(price_cache)
-    #             return count
-    #     except Exception as e:
-    #         logger.exception("Failed to settle tp/sl orders")
-    #         return {"error": "Error during settling tpsl orders"}
 
     def settle_tpsl_orders(self):
         conn = None
         cursor = None
         row_count = 0
+
+        pending_notifs : list[tuple[str, dict]] = []
+
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -1048,7 +1045,12 @@ class TradingService(MySQLAdapter):
                 SELECT 
                     *,
                     IF (oh.type = 'tp', oh.tp, oh.sl) AS exit_price,
-                    IF (oh.or_id IS NOT NULL, TRUE, FALSE) AS from_order
+                    CASE
+                        WHEN oh.or_id IS NOT NULL
+                          OR (oh.order_price IS NOT NULL AND oh.order_price <> 0)
+                        THEN TRUE
+                        ELSE FALSE
+                    END AS from_order
                 FROM mocktrade.order_history AS oh
                 WHERE oh.status = 0
                 AND oh.type in ('tp', 'sl')
@@ -1116,11 +1118,13 @@ class TradingService(MySQLAdapter):
 
                 # 2) Read balance and position
                 cursor.execute("""
-                    SELECT balance FROM `mocktrade`.`user`
+                    SELECT balance, retri_id FROM `mocktrade`.`user`
                     WHERE id = %s
                     AND status = 0
                 """, (user_id,))
-                wallet_balance = cursor.fetchone()['balance']
+                user_row = cursor.fetchone()
+                wallet_balance = user_row.get('balance', 0)
+                retri_id = user_row.get('retri_id')
 
                 cursor.execute("""
                     SELECT * FROM mocktrade.position_history
@@ -1221,11 +1225,27 @@ class TradingService(MySQLAdapter):
                         WHERE or_id = %s 
                     """, (order['or_id'],))
 
+                    cursor.execute("""
+                        UPDATE mocktrade.order_history
+                           SET status = 4
+                         WHERE `type` IN ('tp', 'sl')
+                           AND po_id = %s
+                           AND `symbol` = %s
+                           AND `user_id` = %s
+                    """, (
+                        order['po_id'],
+                        symbol,
+                        user_id
+                    ))
+
                 cursor.execute("""
                     UPDATE mocktrade.order_history
-                    SET status = 1
+                    SET status = 1,
+                        `update_time` = %s
                     WHERE id = %s
-                """, (order_id,))
+                """, (datetime.now(timezone('Asia/Seoul')), order_id,))
+
+
 
                 row_count += 1
 
@@ -1240,7 +1260,16 @@ class TradingService(MySQLAdapter):
                         AND status = 0
                     """, (symbol, user_id))
 
+                pending_notifs.append((
+                    retri_id,
+                    { "trigger": "tp/sl", "order" : order}
+                ))
+
             conn.commit()
+            for user_id, message in pending_notifs:
+                asyncio.create_task(
+                    manager.notify_user(user_id, message)
+                )
             return row_count
 
         except Exception:
