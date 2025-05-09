@@ -14,8 +14,9 @@ from utils.local_redis import update_position_status_to_redis
 
 from utils.price_cache import prices as price_cache
 from utils.fixed_price_cache import prices as fixed_prices
+from starlette.config import Config
 
-
+config = Config(".env")
 logger = logging.getLogger(__name__)
 # CoinGecko simple price endpoint
 API_ENDPOINT = "https://api.coingecko.com/api/v3/simple/price"
@@ -215,9 +216,10 @@ scheduler.add_job(
     id="orchestrator",
     replace_existing=True
 )
+
 scheduler.add_job(
     update_position_status_to_redis,
-    trigger=IntervalTrigger(seconds=600),
+    trigger=IntervalTrigger(seconds=config.get('SOCKET_INTERVAL')),
     next_run_time=datetime.now(),
     id="pnlCalculator",
     replace_existing=True
