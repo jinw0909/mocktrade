@@ -406,6 +406,10 @@ def calc_iso_liq_price_from_margin(
     :param size: notional (amount * entry_price)
     :param side: 'buy' or 'sell'
     """
+
+    if size == 0:
+        return 0.0
+
     ratio = margin / size  # = 1/effective_leverage
 
     if side == 'buy':
@@ -599,12 +603,18 @@ class TradingService(MySQLAdapter):
 
                 # 5) Update wallet for any realized PnL
                 close_pnl = new_position.get('close_pnl', 0)
+                # if close_pnl:
+                #     new_bal = wallet_balance + close_pnl
+                #     if new_bal < 0:
+                #         raise RuntimeError("Balance negative")
+                #     cursor.execute(
+                #         "UPDATE mocktrade.user SET balance = %s WHERE id = %s",
+                #         (new_bal, user_id)
+                #     )
                 if close_pnl:
-                    new_bal = wallet_balance + close_pnl
-                    if new_bal < 0:
-                        raise RuntimeError("Balance negative")
+                    new_bal = max(wallet_balance + close_pnl, 0)
                     cursor.execute(
-                        "UPDATE mocktrade.user SET balance = %s WHERE id = %s",
+                        "UPDATE mocktrade.user SET balance = %s WHERE `id` = %s",
                         (new_bal, user_id)
                     )
 
@@ -1218,15 +1228,22 @@ class TradingService(MySQLAdapter):
 
                 # 5) Update wallet for any realized pnl
                 close_pnl = new_position.get('close_pnl', 0)
+                # if close_pnl:
+                #     new_bal = wallet_balance + close_pnl
+                #     if new_bal < 0:
+                #         raise RuntimeError("Balance negative")
+                #     cursor.execute("""
+                #         UPDATE mocktrade.user
+                #         SET balance = %s
+                #         WHERE id = %s AND status = 0
+                #     """, (new_bal, user_id))
                 if close_pnl:
-                    new_bal = wallet_balance + close_pnl
-                    if new_bal < 0:
-                        raise RuntimeError("Balance negative")
-                    cursor.execute("""
-                        UPDATE mocktrade.user 
-                        SET balance = %s
-                        WHERE id = %s AND status = 0
-                    """, (new_bal, user_id))
+                    new_bal = max(wallet_balance + close_pnl, 0)
+                    cursor.execute(
+                        "UPDATE mocktrade.user SET balance = %s WHERE `id` = %s",
+                        (new_bal, user_id)
+                    )
+
 
                 # 6) Mark this order settled
                 if from_order:

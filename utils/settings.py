@@ -759,10 +759,14 @@ class MySQLAdapter:
                     # c) debit the user's wallet by the lost margin
                     cursor.execute("""
                         UPDATE `mocktrade`.`user`
-                        SET balance = balance + %s
+                        SET balance = 
+                            CASE 
+                                WHEN balance + %s < 0 THEN 0
+                                ELSE balance + %s
+                            END
                         WHERE id = %s
                         AND status = 0    
-                    """, (close_pnl, user_id))
+                    """, (close_pnl, close_pnl, user_id))
 
                     # d) cancel any TP/SL orders for this user + symbol
                     cursor.execute("""
@@ -1197,9 +1201,13 @@ class MySQLAdapter:
                     # d) apply realized PnL to user's wallet balance
                     cursor.execute("""
                         UPDATE mocktrade.user
-                           SET balance = balance + %s
+                           SET balance = 
+                            CASE 
+                                WHEN balance + %s < 0 THEN 0
+                                ELSE balance + %s
+                            END
                          WHERE id = %s
-                    """, (pnl_liq, pos['user_id']))
+                    """, (pnl_liq, pnl_liq, pos['user_id']))
 
                     cross_equity + pos['unrealized_pnl']
 
