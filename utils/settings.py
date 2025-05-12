@@ -50,6 +50,11 @@ def compute_cross_liq_price(
         buffer: float,
         side: str
 ) -> float:
+
+    # guard against zero-size
+    if amount == 0:
+        return 0.0
+
     maintenance_rate = 0.01
     # 3) Solve for the price at which equity == 0
     if side == 'buy':
