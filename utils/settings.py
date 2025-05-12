@@ -784,7 +784,7 @@ class MySQLAdapter:
 
                     pending_notifs.append((
                         retri_id,
-                        {"trigger": "liquidation_cross", "position": pos}
+                        {"trigger": "liquidation_isolated", "position": pos}
                     ))
 
 
@@ -1111,7 +1111,7 @@ class MySQLAdapter:
                       FROM mocktrade.order_history
                      WHERE user_id    = %s
                        AND status     = 0
-                       AND margin_type = 'cross'
+                       AND margin_type = 'isolated'  
                        AND `type` IN ('market','limit')
                 """, (user_id,))
                 order_margin = cursor.fetchone()['frozen'] or 0

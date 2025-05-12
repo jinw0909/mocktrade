@@ -613,18 +613,19 @@ class TradingService(MySQLAdapter):
                 cursor.execute("""
                     UPDATE mocktrade.order_history
                     SET status = 1,
-                        po_id = %s
+                        po_id = %s,
+                        update_time = %s
                     WHERE `id` = %s
-                """, (pos_id, order_id,))
+                """, (pos_id, datetime.now(timezone('Asia/Seoul')), order_id,))
 
                 # 7) close relevant tp/sl orders
                 # if the position being closed, close all the related tp/sl orders
                 if new_position.get('close'):
                     cursor.execute("""
-                        UPDATE `mocktrade`.`order_history` SET `status` = 4
+                        UPDATE `mocktrade`.`order_history` SET `status` = 4, update_time = %s
                         WHERE `type` IN ('tp', 'sl') AND `user_id` = %s AND `symbol` = %s
                         AND `status` = 0
-                    """, (user_id, symbol))
+                    """, (user_id, datetime.now(timezone('Asia/Seoul')), symbol))
 
                 # 8) If tp/sl order was attached
                 if (order["tp"] or order["sl"]) and new_position['amount'] > 0:
@@ -1148,6 +1149,8 @@ class TradingService(MySQLAdapter):
 
                 if current_position['status'] in (3, 4):
                     continue
+                if not current_position:
+                    continue
                 # 3) Compute new position status
                 new_position = calculate_new_position(current_position, order)
 
@@ -1249,9 +1252,10 @@ class TradingService(MySQLAdapter):
                 cursor.execute("""
                     UPDATE mocktrade.order_history
                     SET status = 1,
-                        `update_time` = %s
+                        `update_time` = %s,
+                        `po_id` = %s
                     WHERE id = %s
-                """, (datetime.now(timezone('Asia/Seoul')), order_id,))
+                """, (datetime.now(timezone('Asia/Seoul')), current_position.get('id'), order_id,))
 
 
 
