@@ -458,6 +458,7 @@ class TradingService(MySQLAdapter):
                 SELECT * FROM mocktrade.order_history
                  WHERE `type`= 'limit'
                    AND `status`= 0
+                   AND `amount` > 0
                 ORDER BY `id` DESC
             """)
             open_orders = cursor.fetchall()
@@ -467,256 +468,265 @@ class TradingService(MySQLAdapter):
                 return 0  # or return a message/count
 
             for order in open_orders:
-                symbol = order["symbol"]
-                order_price = order["price"]
-                current_price = price_dict.get(symbol)
-                side = order["side"]
-                order_id = order["id"]
-                user_id = order["user_id"]
+                cursor.execute("SAVEPOINT sp_order")
+                try:
+                    symbol = order["symbol"]
+                    order_price = order["price"]
+                    current_price = price_dict.get(symbol)
+                    side = order["side"]
+                    order_id = order["id"]
+                    user_id = order["user_id"]
 
-                # only process fills
-                if current_price is None:
-                    continue
-                if (side == 'buy' and order_price < current_price) or \
-                        (side == 'sell' and order_price > current_price):
-                    continue
+                    # only process fills
+                    if current_price is None:
+                        continue
+                    if (side == 'buy' and order_price < current_price) or \
+                            (side == 'sell' and order_price > current_price):
+                        continue
 
-                # 1) apply execution-price & recompute margin
-                exec_price = current_price
-                exec_amount = float(order['amount'])
-                leverage = float(order['leverage'])
-                exec_margin = (exec_price * exec_amount) / leverage
+                    # 1) apply execution-price & recompute margin
+                    exec_price = current_price
+                    exec_amount = float(order['amount'])
+                    leverage = float(order['leverage'])
+                    exec_margin = (exec_price * exec_amount) / leverage
 
-                # 1-1) update the in-memory dict so calculate_positions sees real values
-                order['price'] = exec_price
-                order['margin'] = exec_margin
+                    # 1-1) update the in-memory dict so calculate_positions sees real values
+                    order['price'] = exec_price
+                    order['margin'] = exec_margin
 
-                # 1-2) persist those execution values back to the order_history row
-                cursor.execute("""
-                    UPDATE mocktrade.order_history
-                       SET price = %s,
-                           magin = %s,
-                           update_time = %s
-                     WHERE id = %s
-                """, (
-                    exec_price, exec_margin, datetime.now(timezone("Asia/Seoul")), order_id
-                ))
-
-                # 2) Read balance & position
-                cursor.execute("SELECT balance, retri_id FROM `mocktrade`.`user` WHERE `id`= %s AND status = 0", (user_id,))
-                user_row = cursor.fetchone()
-                wallet_balance = user_row.get("balance", 0)
-                retri_id = user_row.get("retri_id")
-
-
-                cursor.execute("""
-                  SELECT * FROM mocktrade.position_history
-                   WHERE user_id = %s AND symbol = %s AND status = 1
-                   ORDER BY `id` DESC LIMIT 1
-                   FOR UPDATE
-                """, (user_id, symbol))
-                current_position = cursor.fetchone()
-
-                # 3) Compute new_position
-                new_position = calculate_position(current_position, order)
-
-                if current_position:
-                    pos_id = current_position.get('id')
-                else:
-                    pos_id = None
-
-                # 4) Persist new position ( + close old ones )
-                cursor.execute("""
-                    UPDATE mocktrade.position_history SET status = 2
-                    WHERE `status` = 1 AND `user_id` = %s AND `symbol` = %s
-                """, (user_id, symbol))
-
-                if new_position.get('close'):
+                    # 1-2) persist those execution values back to the order_history row
                     cursor.execute("""
-                        UPDATE mocktrade.position_history
-                        SET `status` = 3,
-                            `pnl` = %s,
-                            `datetime` = %s,
-                            `close_price` = %s
-                        WHERE `id` = %s 
+                        UPDATE mocktrade.order_history
+                           SET price = %s,
+                               magin = %s,
+                               update_time = %s
+                         WHERE id = %s
                     """, (
-                        new_position.get('close_pnl', 0),
-                        datetime.now(timezone('Asia/Seoul')),
-                        new_position.get('close_price', 0),
-                        pos_id
+                        exec_price, exec_margin, datetime.now(timezone("Asia/Seoul")), order_id
                     ))
 
-                    insert_sql = """
-                      INSERT INTO mocktrade.position_history
-                       (user_id, symbol, size, amount, entry_price,
-                        liq_price, margin_ratio, margin, pnl,
-                        margin_type, side, leverage, status, tp, sl, datetime, close_price)
-                      VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    """
-                    cursor.execute(insert_sql, (
-                        new_position.get('user_id'), new_position.get('symbol'),
-                        new_position.get('size'), new_position.get('amount'),
-                        new_position.get('entry_price'), new_position.get('liq_price'),
-                        new_position.get('margin_ratio'), new_position.get('margin'),
-                        new_position.get('pnl', 0), new_position.get('margin_type'),
-                        new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
-                        new_position.get('tp', 0), new_position.get('sl', 0), datetime.now(timezone("Asia/Seoul")),
-                        new_position.get('close_price')
-                    ))
+                    # 2) Read balance & position
+                    cursor.execute("SELECT balance, retri_id FROM `mocktrade`.`user` WHERE `id`= %s AND status = 0", (user_id,))
+                    user_row = cursor.fetchone()
+                    wallet_balance = user_row.get("balance", 0)
+                    retri_id = user_row.get("retri_id")
 
-                elif new_position.get('partial'):
+
                     cursor.execute("""
-                        UPDATE mocktrade.position_history
-                           SET pnl = %s,
-                               `datetime` = %s,
-                               `close_price` = %s
-                         WHERE `id` = %s
-                    """, (
-                        new_position.get('close_pnl', 0),
-                        datetime.now(timezone('Asia/Seoul')),
-                        new_position.get('close_price'),
-                        pos_id
-                    ))
+                      SELECT * FROM mocktrade.position_history
+                       WHERE user_id = %s AND symbol = %s AND status = 1
+                       ORDER BY `id` DESC LIMIT 1
+                       FOR UPDATE
+                    """, (user_id, symbol))
+                    current_position = cursor.fetchone()
 
-                    insert_sql = """
-                      INSERT INTO mocktrade.position_history
-                       (user_id, symbol, size, amount, entry_price,
-                        liq_price, margin_ratio, margin, pnl,
-                        margin_type, side, leverage, status, tp, sl, datetime, close_price)
-                      VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    """
-                    cursor.execute(insert_sql, (
-                        new_position.get('user_id'), new_position.get('symbol'),
-                        new_position.get('size'), new_position.get('amount'),
-                        new_position.get('entry_price'), new_position.get('liq_price'),
-                        new_position.get('margin_ratio'), new_position.get('margin'),
-                        new_position.get('pnl', 0), new_position.get('margin_type'),
-                        new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
-                        new_position.get('tp', 0), new_position.get('sl', 0), datetime.now(timezone("Asia/Seoul")),
-                        0
-                    ))
+                    # 3) Compute new_position
+                    new_position = calculate_position(current_position, order)
 
-                else:  # same side or new position
-                    insert_sql = """
-                      INSERT INTO mocktrade.position_history
-                       (user_id, symbol, size, amount, entry_price,
-                        liq_price, margin_ratio, margin, pnl,
-                        margin_type, side, leverage, status, tp, sl, datetime, close_price)
-                      VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    """
-                    cursor.execute(insert_sql, (
-                        new_position.get('user_id'), new_position.get('symbol'),
-                        new_position.get('size'), new_position.get('amount'),
-                        new_position.get('entry_price'), new_position.get('liq_price'),
-                        new_position.get('margin_ratio'), new_position.get('margin'),
-                        new_position.get('pnl', 0), new_position.get('margin_type'),
-                        new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
-                        new_position.get('tp', 0), new_position.get('sl', 0), datetime.now(timezone("Asia/Seoul")),
-                        new_position.get('close_price')
-                    ))
+                    if current_position:
+                        pos_id = current_position.get('id')
+                    else:
+                        pos_id = None
 
-                # 5) Update wallet for any realized PnL
-                close_pnl = new_position.get('close_pnl', 0)
-                # if close_pnl:
-                #     new_bal = wallet_balance + close_pnl
-                #     if new_bal < 0:
-                #         raise RuntimeError("Balance negative")
-                #     cursor.execute(
-                #         "UPDATE mocktrade.user SET balance = %s WHERE id = %s",
-                #         (new_bal, user_id)
-                #     )
-                if close_pnl:
-                    new_bal = max(wallet_balance + close_pnl, 0)
-                    cursor.execute(
-                        "UPDATE mocktrade.user SET balance = %s WHERE `id` = %s",
-                        (new_bal, user_id)
-                    )
-
-
-                # 6) Mark order settled
-                cursor.execute("""
-                    UPDATE mocktrade.order_history
-                    SET status = 1,
-                        po_id = %s,
-                        update_time = %s
-                    WHERE `id` = %s
-                """, (pos_id, datetime.now(timezone('Asia/Seoul')), order_id,))
-
-                # 7) close relevant tp/sl orders
-                # if the position being closed, close all the related tp/sl orders
-                if new_position.get('close'):
+                    # 4) Persist new position ( + close old ones )
                     cursor.execute("""
-                        UPDATE `mocktrade`.`order_history` SET `status` = 4, update_time = %s
-                        WHERE `type` IN ('tp', 'sl') AND `user_id` = %s AND `symbol` = %s
-                        AND `status` = 0
-                    """, (user_id, datetime.now(timezone('Asia/Seoul')), symbol))
+                        UPDATE mocktrade.position_history SET status = 2
+                        WHERE `status` = 1 AND `user_id` = %s AND `symbol` = %s
+                    """, (user_id, symbol))
 
-                # 8) If tp/sl order was attached
-                if (order["tp"] or order["sl"]) and new_position['amount'] > 0:
-                    logger.info("opening tp/sl orders from the triggered limit order")
-                    symbol = order['symbol']
-                    limit_tp = order['tp']
-                    limit_sl = order['sl']
-                    limit_amount = order['amount']
-                    limit_side = order['side']
-                    leverage = order['leverage']
-                    margin_type = order['margin_type']
-                    margin = order['magin']
-
-                    order_side = 'sell' if limit_side == 'buy' else 'buy'
-
-                    if limit_tp:
+                    if new_position.get('close'):
                         cursor.execute("""
-                            INSERT INTO mocktrade.order_history (
-                                user_id, symbol, `type`, margin_type, magin, leverage, side, amount, status
-                                ,insert_time, update_time, tp, or_id )
-                            VALUES (
-                                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s )
+                            UPDATE mocktrade.position_history
+                            SET `status` = 3,
+                                `pnl` = %s,
+                                `datetime` = %s,
+                                `close_price` = %s
+                            WHERE `id` = %s 
                         """, (
-                            user_id,
-                            symbol,
-                            'tp',
-                            margin_type,
-                            exec_margin,
-                            leverage,
-                            order_side,
-                            limit_amount,
-                            0,
-                            datetime.now(timezone("Asia/Seoul")),
-                            datetime.now(timezone("Asia/Seoul")),
-                            limit_tp,
-                            order_id
+                            new_position.get('close_pnl', 0),
+                            datetime.now(timezone('Asia/Seoul')),
+                            new_position.get('close_price', 0),
+                            pos_id
                         ))
-                        logger.info("successfully opened the take profit order from the triggered limit order")
 
-                    if limit_sl:
-                        cursor.execute("""
-                            INSERT INTO mocktrade.order_history (
-                                user_id, symbol, `type`, margin_type, magin, leverage, side, amount, status
-                                ,insert_time, update_time, sl, or_id )
-                            VALUES (
-                                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s )
-                        """, (
-                            user_id,
-                            symbol,
-                            'sl',
-                            margin_type,
-                            exec_margin,
-                            leverage,
-                            order_side,
-                            limit_amount,
-                            0,
-                            datetime.now(timezone("Asia/Seoul")),
-                            datetime.now(timezone("Asia/Seoul")),
-                            limit_sl,
-                            order_id
+                        insert_sql = """
+                          INSERT INTO mocktrade.position_history
+                           (user_id, symbol, size, amount, entry_price,
+                            liq_price, margin_ratio, margin, pnl,
+                            margin_type, side, leverage, status, tp, sl, datetime, close_price)
+                          VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        """
+                        cursor.execute(insert_sql, (
+                            new_position.get('user_id'), new_position.get('symbol'),
+                            new_position.get('size'), new_position.get('amount'),
+                            new_position.get('entry_price'), new_position.get('liq_price'),
+                            new_position.get('margin_ratio'), new_position.get('margin'),
+                            new_position.get('pnl', 0), new_position.get('margin_type'),
+                            new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
+                            new_position.get('tp', 0), new_position.get('sl', 0), datetime.now(timezone("Asia/Seoul")),
+                            new_position.get('close_price')
                         ))
-                        logger.info("successfully opened the stop loss order from the triggered limit order")
-                pending_notifs.append((
-                    retri_id,
-                    {"trigger": "limit", "order": order}
-                ))
-                row_count += 1
+
+                    elif new_position.get('partial'):
+                        cursor.execute("""
+                            UPDATE mocktrade.position_history
+                               SET pnl = %s,
+                                   `datetime` = %s,
+                                   `close_price` = %s
+                             WHERE `id` = %s
+                        """, (
+                            new_position.get('close_pnl', 0),
+                            datetime.now(timezone('Asia/Seoul')),
+                            new_position.get('close_price'),
+                            pos_id
+                        ))
+
+                        insert_sql = """
+                          INSERT INTO mocktrade.position_history
+                           (user_id, symbol, size, amount, entry_price,
+                            liq_price, margin_ratio, margin, pnl,
+                            margin_type, side, leverage, status, tp, sl, datetime, close_price)
+                          VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        """
+                        cursor.execute(insert_sql, (
+                            new_position.get('user_id'), new_position.get('symbol'),
+                            new_position.get('size'), new_position.get('amount'),
+                            new_position.get('entry_price'), new_position.get('liq_price'),
+                            new_position.get('margin_ratio'), new_position.get('margin'),
+                            new_position.get('pnl', 0), new_position.get('margin_type'),
+                            new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
+                            new_position.get('tp', 0), new_position.get('sl', 0), datetime.now(timezone("Asia/Seoul")),
+                            0
+                        ))
+
+                    else:  # same side or new position
+                        insert_sql = """
+                          INSERT INTO mocktrade.position_history
+                           (user_id, symbol, size, amount, entry_price,
+                            liq_price, margin_ratio, margin, pnl,
+                            margin_type, side, leverage, status, tp, sl, datetime, close_price)
+                          VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        """
+                        cursor.execute(insert_sql, (
+                            new_position.get('user_id'), new_position.get('symbol'),
+                            new_position.get('size'), new_position.get('amount'),
+                            new_position.get('entry_price'), new_position.get('liq_price'),
+                            new_position.get('margin_ratio'), new_position.get('margin'),
+                            new_position.get('pnl', 0), new_position.get('margin_type'),
+                            new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
+                            new_position.get('tp', 0), new_position.get('sl', 0), datetime.now(timezone("Asia/Seoul")),
+                            new_position.get('close_price')
+                        ))
+
+                    # 5) Update wallet for any realized PnL
+                    close_pnl = new_position.get('close_pnl', 0)
+                    # if close_pnl:
+                    #     new_bal = wallet_balance + close_pnl
+                    #     if new_bal < 0:
+                    #         raise RuntimeError("Balance negative")
+                    #     cursor.execute(
+                    #         "UPDATE mocktrade.user SET balance = %s WHERE id = %s",
+                    #         (new_bal, user_id)
+                    #     )
+                    if close_pnl:
+                        new_bal = max(wallet_balance + close_pnl, 0)
+                        cursor.execute(
+                            "UPDATE mocktrade.user SET balance = %s WHERE `id` = %s",
+                            (new_bal, user_id)
+                        )
+
+
+                    # 6) Mark order settled
+                    cursor.execute("""
+                        UPDATE mocktrade.order_history
+                        SET status = 1,
+                            po_id = %s,
+                            update_time = %s
+                        WHERE `id` = %s
+                    """, (pos_id, datetime.now(timezone('Asia/Seoul')), order_id,))
+
+                    # 7) close relevant tp/sl orders
+                    # if the position being closed, close all the related tp/sl orders
+                    if new_position.get('close'):
+                        cursor.execute("""
+                            UPDATE `mocktrade`.`order_history` SET `status` = 4, update_time = %s
+                            WHERE `type` IN ('tp', 'sl') AND `user_id` = %s AND `symbol` = %s
+                            AND `status` = 0
+                        """, (user_id, datetime.now(timezone('Asia/Seoul')), symbol))
+
+                    # 8) If tp/sl order was attached
+                    if (order["tp"] or order["sl"]) and new_position['amount'] > 0:
+                        logger.info("opening tp/sl orders from the triggered limit order")
+                        symbol = order['symbol']
+                        limit_tp = order['tp']
+                        limit_sl = order['sl']
+                        limit_amount = order['amount']
+                        limit_side = order['side']
+                        leverage = order['leverage']
+                        margin_type = order['margin_type']
+                        margin = order['magin']
+
+                        order_side = 'sell' if limit_side == 'buy' else 'buy'
+
+                        if limit_tp:
+                            cursor.execute("""
+                                INSERT INTO mocktrade.order_history (
+                                    user_id, symbol, `type`, margin_type, magin, leverage, side, amount, status
+                                    ,insert_time, update_time, tp, or_id )
+                                VALUES (
+                                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s )
+                            """, (
+                                user_id,
+                                symbol,
+                                'tp',
+                                margin_type,
+                                exec_margin,
+                                leverage,
+                                order_side,
+                                limit_amount,
+                                0,
+                                datetime.now(timezone("Asia/Seoul")),
+                                datetime.now(timezone("Asia/Seoul")),
+                                limit_tp,
+                                order_id
+                            ))
+                            logger.info("successfully opened the take profit order from the triggered limit order")
+
+                        if limit_sl:
+                            cursor.execute("""
+                                INSERT INTO mocktrade.order_history (
+                                    user_id, symbol, `type`, margin_type, magin, leverage, side, amount, status
+                                    ,insert_time, update_time, sl, or_id )
+                                VALUES (
+                                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s )
+                            """, (
+                                user_id,
+                                symbol,
+                                'sl',
+                                margin_type,
+                                exec_margin,
+                                leverage,
+                                order_side,
+                                limit_amount,
+                                0,
+                                datetime.now(timezone("Asia/Seoul")),
+                                datetime.now(timezone("Asia/Seoul")),
+                                limit_sl,
+                                order_id
+                            ))
+                            logger.info("successfully opened the stop loss order from the triggered limit order")
+                    pending_notifs.append((
+                        retri_id,
+                        {"trigger": "limit", "order": order}
+                    ))
+                    cursor.execute("RELEASE SAVEPOINT sp_order")
+                    row_count += 1
+
+                except Exception:
+                    cursor.execute("ROLLBACK TO SAVEPOINT sp_order")
+                    cursor.execute("RELEASE SAVEPOINT sp_order")
+                    logger.exception(f"failed processing order {order['id']}, skippping to next")
+                    continue
 
             conn.commit()
 
@@ -1085,7 +1095,7 @@ class TradingService(MySQLAdapter):
                         ELSE FALSE
                     END AS from_order
                 FROM mocktrade.order_history AS oh
-                WHERE oh.status = 0
+                WHERE oh.status = 0 AND oh.amount > 0
                 AND oh.type in ('tp', 'sl')
             """)
 
@@ -1097,218 +1107,224 @@ class TradingService(MySQLAdapter):
             price_dict = price_cache
             for order in open_tpsl_orders:
                 # logger.info(f"order: {order}")
-                order_id = order['id']
-                user_id = order['user_id']
-                symbol = order['symbol']
-                exit_price = order['exit_price']
-                from_order = order['from_order']
-                amount = order['amount']
-                leverage = order['leverage']
-                side = order['side']
-                order_type = order['type']
+                cursor.execute("SAVEPOINT sp_order")
+                try:
+                    order_id = order['id']
+                    user_id = order['user_id']
+                    symbol = order['symbol']
+                    exit_price = order['exit_price']
+                    from_order = order['from_order']
+                    amount = order['amount']
+                    leverage = order['leverage']
+                    side = order['side']
+                    order_type = order['type']
 
-                current_price = price_dict.get(symbol)
-                # logger.info(f"current price : {current_price}, symbol: {symbol}")
+                    current_price = price_dict.get(symbol)
+                    # logger.info(f"current price : {current_price}, symbol: {symbol}")
 
-                if current_price is None:
-                    continue
+                    if current_price is None:
+                        continue
 
-                should_settle = False
+                    should_settle = False
 
-                if order_type == 'tp':
-                    # take profit
-                    if (side == 'sell' and current_price >= exit_price) or (
-                            side == 'buy' and current_price <= exit_price):
-                        should_settle = True
-                else:
-                    # stop loss
-                    if (side == 'sell' and current_price <= exit_price) or (
-                            side == 'buy' and current_price >= exit_price):
-                        should_settle = True
+                    if order_type == 'tp':
+                        # take profit
+                        if (side == 'sell' and current_price >= exit_price) or (
+                                side == 'buy' and current_price <= exit_price):
+                            should_settle = True
+                    else:
+                        # stop loss
+                        if (side == 'sell' and current_price <= exit_price) or (
+                                side == 'buy' and current_price >= exit_price):
+                            should_settle = True
 
-                if not should_settle:
-                    continue
+                    if not should_settle:
+                        continue
 
-                if side == 'sell':
-                    exec_price = max(current_price, exit_price)
-                else:
-                    exec_price = min(current_price, exit_price)
+                    if side == 'sell':
+                        exec_price = max(current_price, exit_price)
+                    else:
+                        exec_price = min(current_price, exit_price)
 
-                # exec_price = current_price
-                exec_amount = float(amount)
-                # exec_margin = (exec_price * exec_amount) / leverage
+                    # exec_price = current_price
+                    exec_amount = float(amount)
+                    # exec_margin = (exec_price * exec_amount) / leverage
 
-                # 1) Persist execution values back to the order_history table
-                order['price'] = exec_price
-                # order['margin'] = exec_margin
-
-                cursor.execute("""
-                    UPDATE mocktrade.order_history
-                    SET price = %s, 
-                        update_time = %s
-                    WHERE id = %s
-                """, (exec_price, datetime.now(timezone('Asia/Seoul')), order_id))
-
-                # 2) Read balance and position
-                cursor.execute("""
-                    SELECT balance, retri_id FROM `mocktrade`.`user`
-                    WHERE id = %s
-                    AND status = 0
-                """, (user_id,))
-                user_row = cursor.fetchone()
-                wallet_balance = user_row.get('balance', 0)
-                retri_id = user_row.get('retri_id')
-
-                cursor.execute("""
-                    SELECT * FROM mocktrade.position_history
-                    WHERE symbol = %s
-                    AND user_id = %s
-                    AND status = 1
-                    ORDER BY `id` DESC
-                    LIMIT 1
-                    FOR UPDATE
-                """, (symbol, user_id))
-                current_position = cursor.fetchone()
-                # logger.info(f"current position id: {current_position['id']}")
-
-                if current_position['status'] in (3, 4):
-                    continue
-                if not current_position:
-                    continue
-                # 3) Compute new position status
-                new_position = calculate_new_position(current_position, order)
-
-                # 4) Persist new position
-                # logger.info("setting the previous position status to 2")
-                cursor.execute("""
-                    UPDATE mocktrade.position_history
-                    SET status = 2
-                    WHERE status = 1
-                    AND user_id = %s
-                    AND symbol = %s                
-                """, (user_id, symbol))
-
-                if new_position.get('close'):
-                    # logger.info("position closed. updating the last position")
-                    cursor.execute("""
-                        UPDATE mocktrade.position_history
-                           SET pnl = %s,
-                               close_price = %s,
-                               status = 3,
-                               `datetime` = %s
-                         WHERE `id` = %s   
-                    """, (
-                        new_position.get('close_pnl', 0),
-                        new_position.get('close_price', 0),
-                        datetime.now(timezone('Asia/Seoul')),
-                        current_position.get('id')
-                    ))
-                else:
-                    # partial close
-                    cursor.execute("""
-                        UPDATE mocktrade.position_history
-                           SET pnl = %s,
-                               close_price = %s,
-                               status = 2,
-                               `datetime` = %s
-                         WHERE `id` = %s
-                    """, (
-                        new_position.get('close_pnl', 0),
-                        new_position.get('close_price', 0),
-                        datetime.now(timezone('Asia/Seoul')),
-                        current_position.get('id')
-                    ))
-
-                    cursor.execute("""
-                        INSERT INTO mocktrade.position_history (
-                            user_id, symbol, size, amount, entry_price,
-                            liq_price, margin, pnl,
-                            margin_type, side, leverage, status, tp, sl, datetime, close_price 
-                        ) VALUES (
-                            %s, %s, %s, %s, %s,
-                            %s, %s, %s,
-                            %s, %s, %s, %s, %s, %s, %s, %s
-                        )
-                    """, (
-                        new_position.get('user_id'), new_position.get('symbol'),
-                        new_position.get('size'), new_position.get('amount'),
-                        new_position.get('entry_price'), new_position.get('liq_price'),
-                        new_position.get('margin'),
-                        new_position.get('pnl', 0), new_position.get('margin_type'),
-                        new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
-                        new_position.get('tp', 0), new_position.get('sl', 0), datetime.now(timezone("Asia/Seoul")),
-                        0
-                    ))
-
-                # 5) Update wallet for any realized pnl
-                close_pnl = new_position.get('close_pnl', 0)
-                # if close_pnl:
-                #     new_bal = wallet_balance + close_pnl
-                #     if new_bal < 0:
-                #         raise RuntimeError("Balance negative")
-                #     cursor.execute("""
-                #         UPDATE mocktrade.user
-                #         SET balance = %s
-                #         WHERE id = %s AND status = 0
-                #     """, (new_bal, user_id))
-                if close_pnl:
-                    new_bal = max(wallet_balance + close_pnl, 0)
-                    cursor.execute(
-                        "UPDATE mocktrade.user SET balance = %s WHERE `id` = %s",
-                        (new_bal, user_id)
-                    )
-
-
-                # 6) Mark this order settled
-                if from_order:
-                    cursor.execute("""
-                        UPDATE mocktrade.order_history
-                        SET status = 4
-                        WHERE or_id = %s 
-                    """, (order['or_id'],))
+                    # 1) Persist execution values back to the order_history table
+                    order['price'] = exec_price
+                    # order['margin'] = exec_margin
 
                     cursor.execute("""
                         UPDATE mocktrade.order_history
-                           SET status = 4
-                         WHERE `type` IN ('tp', 'sl')
-                           AND po_id = %s
-                           AND `symbol` = %s
-                           AND `user_id` = %s
-                    """, (
-                        order['po_id'],
-                        symbol,
-                        user_id
-                    ))
+                        SET price = %s, 
+                            update_time = %s
+                        WHERE id = %s
+                    """, (exec_price, datetime.now(timezone('Asia/Seoul')), order_id))
 
-                cursor.execute("""
-                    UPDATE mocktrade.order_history
-                    SET status = 1,
-                        `update_time` = %s,
-                        `po_id` = %s
-                    WHERE id = %s
-                """, (datetime.now(timezone('Asia/Seoul')), current_position.get('id'), order_id,))
-
-
-
-                row_count += 1
-
-                # 7) close relevant tp/sl positions
-                if new_position.get('close'):
+                    # 2) Read balance and position
                     cursor.execute("""
-                        UPDATE mocktrade.order_history
-                        SET status = 4
-                        WHERE `type` IN ('tp', 'sl')
-                        AND `symbol` = %s
-                        AND `user_id` = %s
+                        SELECT balance, retri_id FROM `mocktrade`.`user`
+                        WHERE id = %s
                         AND status = 0
-                    """, (symbol, user_id))
+                    """, (user_id,))
+                    user_row = cursor.fetchone()
+                    wallet_balance = user_row.get('balance', 0)
+                    retri_id = user_row.get('retri_id')
 
-                pending_notifs.append((
-                    retri_id,
-                    { "trigger": "tp/sl", "order" : order}
-                ))
+                    cursor.execute("""
+                        SELECT * FROM mocktrade.position_history
+                        WHERE symbol = %s
+                        AND user_id = %s
+                        AND status = 1
+                        ORDER BY `id` DESC
+                        LIMIT 1
+                        FOR UPDATE
+                    """, (symbol, user_id))
+                    current_position = cursor.fetchone()
+                    # logger.info(f"current position id: {current_position['id']}")
+
+                    if current_position['status'] in (3, 4):
+                        continue
+                    if not current_position:
+                        continue
+                    # 3) Compute new position status
+                    new_position = calculate_new_position(current_position, order)
+
+                    # 4) Persist new position
+                    # logger.info("setting the previous position status to 2")
+                    cursor.execute("""
+                        UPDATE mocktrade.position_history
+                        SET status = 2
+                        WHERE status = 1
+                        AND user_id = %s
+                        AND symbol = %s                
+                    """, (user_id, symbol))
+
+                    if new_position.get('close'):
+                        # logger.info("position closed. updating the last position")
+                        cursor.execute("""
+                            UPDATE mocktrade.position_history
+                               SET pnl = %s,
+                                   close_price = %s,
+                                   status = 3,
+                                   `datetime` = %s
+                             WHERE `id` = %s   
+                        """, (
+                            new_position.get('close_pnl', 0),
+                            new_position.get('close_price', 0),
+                            datetime.now(timezone('Asia/Seoul')),
+                            current_position.get('id')
+                        ))
+                    else:
+                        # partial close
+                        cursor.execute("""
+                            UPDATE mocktrade.position_history
+                               SET pnl = %s,
+                                   close_price = %s,
+                                   status = 2,
+                                   `datetime` = %s
+                             WHERE `id` = %s
+                        """, (
+                            new_position.get('close_pnl', 0),
+                            new_position.get('close_price', 0),
+                            datetime.now(timezone('Asia/Seoul')),
+                            current_position.get('id')
+                        ))
+
+                        cursor.execute("""
+                            INSERT INTO mocktrade.position_history (
+                                user_id, symbol, size, amount, entry_price,
+                                liq_price, margin, pnl,
+                                margin_type, side, leverage, status, tp, sl, datetime, close_price 
+                            ) VALUES (
+                                %s, %s, %s, %s, %s,
+                                %s, %s, %s,
+                                %s, %s, %s, %s, %s, %s, %s, %s
+                            )
+                        """, (
+                            new_position.get('user_id'), new_position.get('symbol'),
+                            new_position.get('size'), new_position.get('amount'),
+                            new_position.get('entry_price'), new_position.get('liq_price'),
+                            new_position.get('margin'),
+                            new_position.get('pnl', 0), new_position.get('margin_type'),
+                            new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
+                            new_position.get('tp', 0), new_position.get('sl', 0), datetime.now(timezone("Asia/Seoul")),
+                            0
+                        ))
+
+                    # 5) Update wallet for any realized pnl
+                    close_pnl = new_position.get('close_pnl', 0)
+                    # if close_pnl:
+                    #     new_bal = wallet_balance + close_pnl
+                    #     if new_bal < 0:
+                    #         raise RuntimeError("Balance negative")
+                    #     cursor.execute("""
+                    #         UPDATE mocktrade.user
+                    #         SET balance = %s
+                    #         WHERE id = %s AND status = 0
+                    #     """, (new_bal, user_id))
+                    if close_pnl:
+                        new_bal = max(wallet_balance + close_pnl, 0)
+                        cursor.execute(
+                            "UPDATE mocktrade.user SET balance = %s WHERE `id` = %s",
+                            (new_bal, user_id)
+                        )
+
+
+                    # 6) Mark this order settled
+                    if from_order:
+                        cursor.execute("""
+                            UPDATE mocktrade.order_history
+                            SET status = 4
+                            WHERE or_id = %s 
+                        """, (order['or_id'],))
+
+                        cursor.execute("""
+                            UPDATE mocktrade.order_history
+                               SET status = 4
+                             WHERE `type` IN ('tp', 'sl')
+                               AND po_id = %s
+                               AND `symbol` = %s
+                               AND `user_id` = %s
+                        """, (
+                            order['po_id'],
+                            symbol,
+                            user_id
+                        ))
+
+                    cursor.execute("""
+                        UPDATE mocktrade.order_history
+                        SET status = 1,
+                            `update_time` = %s,
+                            `po_id` = %s
+                        WHERE id = %s
+                    """, (datetime.now(timezone('Asia/Seoul')), current_position.get('id'), order_id,))
+
+                    # 7) close relevant tp/sl positions
+                    if new_position.get('close'):
+                        cursor.execute("""
+                            UPDATE mocktrade.order_history
+                            SET status = 4
+                            WHERE `type` IN ('tp', 'sl')
+                            AND `symbol` = %s
+                            AND `user_id` = %s
+                            AND status = 0
+                        """, (symbol, user_id))
+
+                    pending_notifs.append((
+                        retri_id,
+                        { "trigger": "tp/sl", "order" : order}
+                    ))
+                    cursor.execute("RELEASE SAVEPOINT sp_order")
+                    row_count += 1
+                except Exception:
+                    cursor.execute("ROLLBACK TO SAVEPOINT sp_order")
+                    cursor.execute("RELEASE SAVEPOINT sp_order")
+                    logger.exception(f"failed to execute tp/sl order of [{order['id']}]")
+                    continue
 
             conn.commit()
+
             for user_id, message in pending_notifs:
                 asyncio.create_task(
                     manager.notify_user(user_id, message)
