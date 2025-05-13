@@ -59,10 +59,20 @@ def compute_cross_liq_price(
     # 3) Solve for the price at which equity == 0
     if side == 'buy':
         # long -> liquidate when price falls to this level
-        return max((entry_price - buffer / amount) / (1 - maintenance_rate), 0.0)
+        # return max((entry_price - buffer / amount) / (1 - maintenance_rate), 0.0)
+        return max(
+            entry_price * (1 + 0.01) - buffer / amount,
+            0.0
+        )
+
+
     else:
         # short -> liquidate when price rises to this level
-        return max((entry_price + buffer / amount) / ( 1 + maintenance_rate), 0.0)
+        # return max((entry_price + buffer / amount) / ( 1 + maintenance_rate), 0.0)
+        return max(
+            entry_price * (1 - 0.01) + buffer / amount,
+            0.0
+        )
 
 
 def should_liquidate(
@@ -678,6 +688,7 @@ class MySQLAdapter:
 
         try:
             conn = self._get_connection()
+            conn.autocommit(False)
             cursor = conn.cursor()
 
             # cursor.execute("""
@@ -699,105 +710,111 @@ class MySQLAdapter:
             active_positions = cursor.fetchall()
             #3) Iterate and liquidate if necessary
             for pos in active_positions:
-                symbol = pos['symbol']
-                side = pos['side']
-                liq_price = float(pos['liq_price'])
-                current_price = price_dict.get(symbol)
+                cursor.execute("SAVEPOINT lq_order")
+                try:
+                    symbol = pos['symbol']
+                    side = pos['side']
+                    liq_price = float(pos['liq_price'])
+                    current_price = price_dict.get(symbol)
 
-                if current_price is None:
-                    continue
+                    if current_price is None:
+                        continue
 
-                # check liquidation condition
-                if (side == 'buy' and current_price <= liq_price) or (side == 'sell' and current_price >= liq_price):
-                    user_id = pos['user_id']
-                    pos_id = pos['id']
-                    margin = float(pos['margin'])
-                    close_pnl = -margin  # isolated -> full margin loss
+                    # check liquidation condition
+                    if (side == 'buy' and current_price <= liq_price) or (side == 'sell' and current_price >= liq_price):
+                        user_id = pos['user_id']
+                        pos_id = pos['id']
+                        margin = float(pos['margin'])
+                        close_pnl = -margin  # isolated -> full margin loss
 
-                    # a) mark the old position snapshots as "closed"
-                    cursor.execute("""
-                        UPDATE mocktrade.position_history
-                        SET status = 2
-                        WHERE status = 1
-                        AND symbol = %s
-                        AND user_id = %s
-                    """, (symbol, user_id))
+                        # a) mark the old position snapshots as "closed"
+                        cursor.execute("""
+                            UPDATE mocktrade.position_history
+                            SET status = 2
+                            WHERE status = 1
+                            AND symbol = %s
+                            AND user_id = %s
+                        """, (symbol, user_id))
 
-                    # b) insert a new "liquidation" record
-                    # cursor.execute("""
-                    #     INSERT INTO mocktrade.position_history (
-                    #         user_id, symbol, size, amount, entry_price,
-                    #         liq_price, margin, pnl, margin_type,
-                    #         side, leverage, status, datetime, close_price
-                    #     ) VALUES (
-                    #         %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
-                    #     )
-                    # """, (
-                    #     user_id,
-                    #     symbol,
-                    #     0,
-                    #     0,
-                    #     None,
-                    #     None,
-                    #     0,
-                    #     close_pnl,  # realized PnL: full margin loss
-                    #     pos['margin_type'],
-                    #     side,
-                    #     pos['leverage'],
-                    #     3,  # liquidated
-                    #     datetime.now(timezone('Asia/Seoul')),
-                    #     current_price  # price at which it was liquidated
-                    # ))
+                        # b) insert a new "liquidation" record
+                        # cursor.execute("""
+                        #     INSERT INTO mocktrade.position_history (
+                        #         user_id, symbol, size, amount, entry_price,
+                        #         liq_price, margin, pnl, margin_type,
+                        #         side, leverage, status, datetime, close_price
+                        #     ) VALUES (
+                        #         %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                        #     )
+                        # """, (
+                        #     user_id,
+                        #     symbol,
+                        #     0,
+                        #     0,
+                        #     None,
+                        #     None,
+                        #     0,
+                        #     close_pnl,  # realized PnL: full margin loss
+                        #     pos['margin_type'],
+                        #     side,
+                        #     pos['leverage'],
+                        #     3,  # liquidated
+                        #     datetime.now(timezone('Asia/Seoul')),
+                        #     current_price  # price at which it was liquidated
+                        # ))
 
-                    # b) update position status to liquidated
-                    cursor.execute("""
-                        UPDATE mocktrade.position_history
-                           SET pnl = %s,
-                               close_price = %s,
-                               status = 3,
-                               `datetime` = %s
-                         WHERE `id` = %s
-                    """, (
-                        close_pnl, liq_price, datetime.now(timezone('Asia/Seoul')), pos_id
-                    ))
+                        # b) update position status to liquidated
+                        cursor.execute("""
+                            UPDATE mocktrade.position_history
+                               SET pnl = %s,
+                                   close_price = %s,
+                                   status = 3,
+                                   `datetime` = %s
+                             WHERE `id` = %s
+                        """, (
+                            close_pnl, liq_price, datetime.now(timezone('Asia/Seoul')), pos_id
+                        ))
 
-                    # c) debit the user's wallet by the lost margin
-                    cursor.execute("""
-                        UPDATE `mocktrade`.`user`
-                        SET balance = 
-                            CASE 
-                                WHEN balance + %s < 0 THEN 0
-                                ELSE balance + %s
-                            END
-                        WHERE id = %s
-                        AND status = 0    
-                    """, (close_pnl, close_pnl, user_id))
+                        # c) debit the user's wallet by the lost margin
+                        cursor.execute("""
+                            UPDATE `mocktrade`.`user`
+                            SET balance = 
+                                CASE 
+                                    WHEN balance + %s < 0 THEN 0
+                                    ELSE balance + %s
+                                END
+                            WHERE id = %s
+                            AND status = 0    
+                        """, (close_pnl, close_pnl, user_id))
 
-                    # d) cancel any TP/SL orders for this user + symbol
-                    cursor.execute("""
-                        UPDATE mocktrade.order_history
-                        SET status = 4
-                        WHERE user_id = %s
-                        AND symbol = %s
-                        AND `type` IN ('tp', 'sl')    
-                    """, (user_id, symbol))
+                        # d) cancel any TP/SL orders for this user + symbol
+                        cursor.execute("""
+                            UPDATE mocktrade.order_history
+                            SET status = 4
+                            WHERE user_id = %s
+                            AND symbol = %s
+                            AND `type` IN ('tp', 'sl')    
+                        """, (user_id, symbol))
 
-                    # e) get the retri_id of user
-                    cursor.execute("""
-                        SELECT retri_id FROM mocktrade.user
-                        WHERE `id` = %s
-                        AND `status` = 0
-                    """, (user_id,))
+                        # e) get the retri_id of user
+                        cursor.execute("""
+                            SELECT retri_id FROM mocktrade.user
+                            WHERE `id` = %s
+                            AND `status` = 0
+                        """, (user_id,))
 
-                    retri_id = cursor.fetchone()['retri_id']
+                        retri_id = cursor.fetchone()['retri_id']
 
-                    pending_notifs.append((
-                        retri_id,
-                        {"trigger": "liquidation_isolated", "position": pos}
-                    ))
+                        pending_notifs.append((
+                            retri_id,
+                            {"trigger": "liquidation_isolated", "position": pos}
+                        ))
 
-
-                    liquidated += 1
+                        cursor.execute("RELEASE SAVEPOINT lq_order")
+                        liquidated += 1
+                except Exception:
+                    cursor.execute("ROLLBACK TO SAVEPOINT lq_order")
+                    cursor.execute("RELEASE SAVEPOINT lq_order")
+                    logger.exception(f"failed to liquidate position with id of [{pos['id']}]")
 
             conn.commit()
 
@@ -1083,6 +1100,7 @@ class MySQLAdapter:
         pending_notifs : list[tuple[str, dict]] = []
         try:
             conn = self._get_connection()
+            conn.autocommit(False)
             cursor = conn.cursor()
 
             # 1) grab all active cross-margin positions
@@ -1100,150 +1118,159 @@ class MySQLAdapter:
             # 3) iterate each user's bucket
             for user_id, positions in positions_by_user.items():
                 # — a) wallet balance
-                cursor.execute("""
+                cursor.execute("SAVEPOINT lqc_order")
+                try:
+                    cursor.execute("""
                     SELECT balance, retri_id
                       FROM mocktrade.user
                      WHERE id     = %s
                        AND status = 0
                     LIMIT 1
-                """, (user_id,))
-                user_row = cursor.fetchone()
-                wallet_balance = user_row['balance'] or 0
-                retri_id = user_row['retri_id']
+                    """, (user_id,))
+                    user_row = cursor.fetchone()
+                    wallet_balance = user_row['balance'] or 0
+                    retri_id = user_row['retri_id']
 
-                # — b) frozen margin isolated positions
-                iso_initial = sum(p['margin'] for p in positions if p['margin_type'] == 'isolated')
+                    # — b) frozen margin isolated positions
+                    iso_initial = sum(p['margin'] for p in positions if p['margin_type'] == 'isolated')
 
-                # — c) frozen margin from pending cross orders
-                cursor.execute("""
-                    SELECT COALESCE(SUM(magin),0) AS frozen
-                      FROM mocktrade.order_history
-                     WHERE user_id    = %s
-                       AND status     = 0
-                       AND margin_type = 'isolated'  
-                       AND `type` IN ('market','limit')
-                """, (user_id,))
-                order_margin = cursor.fetchone()['frozen'] or 0
-
-                # — d) unrealized PnL from these cross positions
-                unrealized_pnl = sum(p['unrealized_pnl'] for p in positions if p['margin_type'] == 'cross')
-
-                # — e) compute cross_equity
-                cross_equity = (wallet_balance - iso_initial - order_margin)
-
-                # 4) now loop each position for liq-price updates and possible liquidation
-                cross_positions = [p for p in positions if p['margin_type'] == 'cross']
-                to_liquidate = []
-
-                # 4-a) 청산 대상 탐색
-                for pos in cross_positions:
-                    maint_other = sum(
-                        p['entry_price'] * p['amount'] * 0.01 for p in cross_positions if p is not pos
-                    )
-                    unrealized_pnl = sum(
-                        p['unrealized_pnl'] for p in cross_positions if p is not pos
-                    )
-                    buffer_for_pos = cross_equity - maint_other + unrealized_pnl
-                    new_liq = compute_cross_liq_price(
-                        entry_price = pos['entry_price'],
-                        amount = pos['amount'],
-                        buffer = buffer_for_pos,
-                        side = pos['side']
-                        # ..maintenance params
-                    )
-                    current_price = price_cache[pos['symbol']]
-
-                    if should_liquidate(pos['side'], current_price, new_liq):
-                        # to_liquidate.append((pos, current_price))
-                        to_liquidate.append((pos, new_liq))
-
-                # 4-b) 일괄 청산
-                for pos, exit_price in to_liquidate:
-                    # a) close the old position
+                    # — c) frozen margin from pending cross orders
                     cursor.execute("""
-                        UPDATE mocktrade.position_history
-                        SET status = 2
-                        WHERE symbol = %s AND user_id = %s AND status = 2    
-                    """, (pos['id'], pos['user_id']))
+                        SELECT COALESCE(SUM(magin),0) AS frozen
+                          FROM mocktrade.order_history
+                         WHERE user_id    = %s
+                           AND status     = 0
+                           AND margin_type = 'isolated'  
+                           AND `type` IN ('market','limit')
+                    """, (user_id,))
+                    order_margin = cursor.fetchone()['frozen'] or 0
 
-                    # b) compute realized PnL on the fill
-                    pnl_liq = ((exit_price - pos['entry_price']) if pos['side'] == 'buy' else (pos['entry_price'] - exit_price)) * pos['amount']
+                    # — d) unrealized PnL from these cross positions
+                    unrealized_pnl = sum(p['unrealized_pnl'] for p in positions if p['margin_type'] == 'cross')
 
-                    # # c) insert the liquidation record (status = 4)
-                    # cursor.execute("""
-                    #     INSERT INTO mocktrade.position_history (
-                    #       user_id, symbol, size, amount, entry_price,
-                    #       liq_price, margin,  pnl,
-                    #       margin_type, side, leverage, status, tp, sl, datetime, close_price
-                    #     ) VALUES (
-                    #       %s, %s, 0, 0, 0,
-                    #       0, 0, %s,
-                    #       %s, %s, %s, 3, %s, %s, %s, %s
-                    #     )
-                    # """, (
-                    #     pos['user_id'], pos['symbol'], pnl_liq,
-                    #     pos['margin_type'], pos['side'], pos['leverage'],
-                    #     pos['tp'], pos['sl'],
-                    #     datetime.now(timezone("Asia/Seoul")),
-                    #     exit_price,
-                    # ))
+                    # — e) compute cross_equity
+                    cross_equity = (wallet_balance - iso_initial - order_margin)
 
-                    # c) update the position to liquidated
-                    cursor.execute("""
-                        UPDATE mocktrade.position_history
-                           SET pnl = %s,
-                               datetime = %s,
-                               close_price = %s,
-                               status = 3
-                         WHERE `id` = %s
-                    """, (
-                        pnl_liq,
-                        datetime.now(timezone("Asia/Seoul")),
-                        exit_price,
-                        pos['id']
-                    ))
+                    # 4) now loop each position for liq-price updates and possible liquidation
+                    cross_positions = [p for p in positions if p['margin_type'] == 'cross']
+                    to_liquidate = []
 
-                    # d) apply realized PnL to user's wallet balance
-                    cursor.execute("""
-                        UPDATE mocktrade.user
-                           SET balance = 
-                            CASE 
-                                WHEN balance + %s < 0 THEN 0
-                                ELSE balance + %s
-                            END
-                         WHERE id = %s
-                    """, (pnl_liq, pnl_liq, pos['user_id']))
+                    # 4-a) 청산 대상 탐색
+                    for pos in cross_positions:
+                        maint_other = sum(
+                            p['entry_price'] * p['amount'] * 0.01 for p in cross_positions if p is not pos
+                        )
+                        unrealized_pnl = sum(
+                            p['unrealized_pnl'] for p in cross_positions if p is not pos
+                        )
+                        buffer_for_pos = cross_equity - maint_other + unrealized_pnl
+                        new_liq = compute_cross_liq_price(
+                            entry_price = pos['entry_price'],
+                            amount = pos['amount'],
+                            buffer = buffer_for_pos,
+                            side = pos['side']
+                            # ..maintenance params
+                        )
+                        current_price = price_cache[pos['symbol']]
 
-                    cross_equity + pos['unrealized_pnl']
+                        if should_liquidate(pos['side'], current_price, new_liq):
+                            # to_liquidate.append((pos, current_price))
+                            to_liquidate.append((pos, new_liq))
 
-                    pending_notifs.append((
-                        retri_id,
-                        { "trigger" : "liquidation_cross", "pos": pos}))
-
-                    liq_count += 1
-
-                # 5) survivors 업데이트
-                remaining = [p for p in cross_positions if p['id'] not in {c[0]['id'] for c in to_liquidate}]
-
-                for pos in remaining:
-                    maint_other = sum(p['entry_price'] * p['amount'] * 0.01 for p in remaining if p is not pos)
-                    unrealized_pnl = sum(p['unrealized_pnl'] for p in remaining if p is not pos)
-                    buffer_for_pos = cross_equity - maint_other + unrealized_pnl
-
-                    final_liq = compute_cross_liq_price(
-                        entry_price = pos['entry_price'],
-                        amount = pos['amount'],
-                        buffer = buffer_for_pos,
-                        side = pos['side']
-                    )
-                    if final_liq != pos['liq_price']:
+                    # 4-b) 일괄 청산
+                    for pos, exit_price in to_liquidate:
+                        # a) close the old position
                         cursor.execute("""
                             UPDATE mocktrade.position_history
-                            SET liq_price = %s
-                            WHERE id = %s
-                        """, (final_liq, pos['id']))
+                            SET status = 2
+                            WHERE symbol = %s AND user_id = %s AND status = 2    
+                        """, (pos['id'], pos['user_id']))
 
-                    row_count += 1
+                        # b) compute realized PnL on the fill
+                        pnl_liq = ((exit_price - pos['entry_price']) if pos['side'] == 'buy' else (pos['entry_price'] - exit_price)) * pos['amount']
+
+                        # # c) insert the liquidation record (status = 4)
+                        # cursor.execute("""
+                        #     INSERT INTO mocktrade.position_history (
+                        #       user_id, symbol, size, amount, entry_price,
+                        #       liq_price, margin,  pnl,
+                        #       margin_type, side, leverage, status, tp, sl, datetime, close_price
+                        #     ) VALUES (
+                        #       %s, %s, 0, 0, 0,
+                        #       0, 0, %s,
+                        #       %s, %s, %s, 3, %s, %s, %s, %s
+                        #     )
+                        # """, (
+                        #     pos['user_id'], pos['symbol'], pnl_liq,
+                        #     pos['margin_type'], pos['side'], pos['leverage'],
+                        #     pos['tp'], pos['sl'],
+                        #     datetime.now(timezone("Asia/Seoul")),
+                        #     exit_price,
+                        # ))
+
+                        # c) update the position to liquidated
+                        cursor.execute("""
+                            UPDATE mocktrade.position_history
+                               SET pnl = %s,
+                                   datetime = %s,
+                                   close_price = %s,
+                                   status = 3
+                             WHERE `id` = %s
+                        """, (
+                            pnl_liq,
+                            datetime.now(timezone("Asia/Seoul")),
+                            exit_price,
+                            pos['id']
+                        ))
+
+                        # d) apply realized PnL to user's wallet balance
+                        cursor.execute("""
+                            UPDATE mocktrade.user
+                               SET balance = 
+                                CASE 
+                                    WHEN balance + %s < 0 THEN 0
+                                    ELSE balance + %s
+                                END
+                             WHERE id = %s
+                        """, (pnl_liq, pnl_liq, pos['user_id']))
+
+                        cross_equity + pos['unrealized_pnl']
+
+                        pending_notifs.append((
+                            retri_id,
+                            { "trigger" : "liquidation_cross", "pos": pos}))
+
+                        liq_count += 1
+
+                    # 5) survivors 업데이트
+                    remaining = [p for p in cross_positions if p['id'] not in {c[0]['id'] for c in to_liquidate}]
+
+                    for pos in remaining:
+                        maint_other = sum(p['entry_price'] * p['amount'] * 0.01 for p in remaining if p is not pos)
+                        unrealized_pnl = sum(p['unrealized_pnl'] for p in remaining if p is not pos)
+                        buffer_for_pos = cross_equity - maint_other + unrealized_pnl
+
+                        final_liq = compute_cross_liq_price(
+                            entry_price = pos['entry_price'],
+                            amount = pos['amount'],
+                            buffer = buffer_for_pos,
+                            side = pos['side']
+                        )
+                        if final_liq != pos['liq_price']:
+                            cursor.execute("""
+                                UPDATE mocktrade.position_history
+                                SET liq_price = %s
+                                WHERE id = %s
+                            """, (final_liq, pos['id']))
+
+                        row_count += 1
+
+                    cursor.execute("RELEASE SAVEPOINT lqc_order")
+
+                except Exception:
+                    cursor.execute("ROLLBACK TO SAVEPOINT lqc_order")
+                    cursor.execute("RELEASE SAVEPOINT lqc_order")
+                    logger.exception(f"failed to liquidate or calculate liquidation price of cross mode position for the user with id of {user_id}")
 
             conn.commit()
             for user_id, message in pending_notifs:

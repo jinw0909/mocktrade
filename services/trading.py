@@ -468,7 +468,7 @@ class TradingService(MySQLAdapter):
                 return 0  # or return a message/count
 
             for order in open_orders:
-                cursor.execute("SAVEPOINT sp_order")
+                cursor.execute("SAVEPOINT tp_order")
                 try:
                     symbol = order["symbol"]
                     order_price = order["price"]
@@ -719,12 +719,12 @@ class TradingService(MySQLAdapter):
                         retri_id,
                         {"trigger": "limit", "order": order}
                     ))
-                    cursor.execute("RELEASE SAVEPOINT sp_order")
+                    cursor.execute("RELEASE SAVEPOINT tp_order")
                     row_count += 1
 
                 except Exception:
-                    cursor.execute("ROLLBACK TO SAVEPOINT sp_order")
-                    cursor.execute("RELEASE SAVEPOINT sp_order")
+                    cursor.execute("ROLLBACK TO SAVEPOINT tp_order")
+                    cursor.execute("RELEASE SAVEPOINT tp_order")
                     logger.exception(f"failed processing order {order['id']}, skippping to next")
                     continue
 
@@ -1082,6 +1082,7 @@ class TradingService(MySQLAdapter):
 
         try:
             conn = self._get_connection()
+            conn.autocommit(False)
             cursor = conn.cursor()
 
             cursor.execute("""
