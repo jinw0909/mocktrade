@@ -221,13 +221,27 @@ def calculate_position(current_position, order):
     # case 2: Same-side -> merge positions
     if current_side == side:
         logger.info("case 2: same side")
+
         total_amount = current_amount + amount
         total_value = (current_entry_price * current_amount) + (price * amount)
-        avg_entry_price = total_value / total_amount
+        # 1) guard avg_entry_price
+        if total_amount > 0:
+            avg_entry_price = total_value / total_amount
+        else:
+        # fallback to whatever makes sense — e.g. the new order price
+            avg_entry_price = price
+        # avg_entry_price = total_value / total_amount
         total_size = total_amount * avg_entry_price
         total_margin = current_margin + order_margin
         logger.info(f"current_margin: {current_margin}, order_margin: {order_margin}, total_margin: {total_margin}")
-        effective_leverage = total_size / total_margin if total_margin else leverage
+        # 2) guard effective_leverage
+        if total_margin > 0:
+            effective_leverage = total_size / total_margin
+        else:
+            # if somehow margin is zero, fall back to your default leverage
+            effective_leverage = leverage
+
+        # effective_leverage = total_size / total_margin if total_margin else leverage
 
         # released_margin = calc_released_margin(current_margin, total_margin)
         # liq_price = calc_iso_liq_price(
@@ -274,7 +288,7 @@ def calculate_position(current_position, order):
         new_margin = current_margin * (new_amount / current_amount)
         new_size = new_amount * current_entry_price
 
-        effective_leverage = current_size / current_margin if current_margin else leverage
+        # effective_leverage = current_size / current_margin if current_margin else leverage
 
         # released_margin = calc_released_margin(current_margin, new_margin)
         # liq_price = calc_iso_liq_price(
