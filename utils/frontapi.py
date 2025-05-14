@@ -462,7 +462,7 @@ class MySQLAdapter:
                             new_dict['close_vol']=str(order['amount'].iloc[0])
                             new_dict['entry_price']=str(df_data['entry_price'])
                             new_dict['close_price']=str(order['price'].iloc[0])
-                            new_dict['close_pnl']=str(df_data['pnl'])
+                            new_dict['close_pnl']=float(format(df_data['pnl'], ".8f"))
                             new_dict['close_datetime']=datetime.strftime(order['insert_time'].iloc[0],"%Y-%m-%d %H:%M:%S")
                             
                             # new_dict['amount']=str(df_data['amount'])
