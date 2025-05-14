@@ -102,9 +102,6 @@ def calculate_new_position(current_position, order):
     new_margin = cur_margin * (new_amt / cur_amt)
 
     # recalc liquidation for remaining
-    # (you’ll need your own helper or inline formula)
-    # new_liq = calc_iso_liq_price(cur_price, leverage, cs)
-
     new_liq = calc_iso_liq_price_from_margin(
         cur_price,
         new_margin,
@@ -160,11 +157,6 @@ def calculate_position(current_position, order):
     # case 1. No current position -> create new
     if not current_position:
         logger.info("case 1, no current position")
-        # liq_price = calc_iso_liq_price(
-        #     price,
-        #     leverage,
-        #     side
-        # )
         liq_price = calc_iso_liq_price_from_margin(
             price,  # entry_price
             order_margin,  # margin
@@ -243,12 +235,6 @@ def calculate_position(current_position, order):
 
         # effective_leverage = total_size / total_margin if total_margin else leverage
 
-        # released_margin = calc_released_margin(current_margin, total_margin)
-        # liq_price = calc_iso_liq_price(
-        #     avg_entry_price,
-        #     round(effective_leverage, 4),
-        #     side
-        # )
         liq_price = calc_iso_liq_price_from_margin(
             avg_entry_price,  # entry_price
             total_margin,  # margin
@@ -289,13 +275,6 @@ def calculate_position(current_position, order):
         new_size = new_amount * current_entry_price
 
         # effective_leverage = current_size / current_margin if current_margin else leverage
-
-        # released_margin = calc_released_margin(current_margin, new_margin)
-        # liq_price = calc_iso_liq_price(
-        #     current_entry_price,
-        #     round(effective_leverage, 4),
-        #     current_side
-        # )
 
         liq_price = calc_iso_liq_price_from_margin(
             current_entry_price,
@@ -367,8 +346,6 @@ def calculate_position(current_position, order):
         new_value = price * flip_amount
         new_margin = new_value / leverage
 
-        # liq_price = calc_iso_liq_price(
-        #     price, leverage, side)
 
         liq_price = calc_iso_liq_price_from_margin(
             price,
@@ -750,329 +727,6 @@ class TradingService(MySQLAdapter):
             if conn:
                 conn.close()
 
-    def execute_tpsl(self, price_dict):
-        """
-        price_dict: { symbol: current_price, ... }
-        Returns number of orders settled.
-        """
-        mysql = MySQLAdapter()
-        conn = mysql._get_connection()
-        conn.autocommit(False)
-        cursor = conn.cursor()
-        settled = 0
-
-        try:
-            # 1) Grab all live TP/SL orders + their active position metadata
-            cursor.execute("""
-                SELECT o.*,
-                CASE 
-                    WHEN o.`type` = 'tp' THEN o.tp
-                    ELSE o.sl
-                END AS exit_price
-                FROM mocktrade.order_history AS o
-                WHERE `status` = 0
-                AND type IN ('tp', 'sl')
-            """)
-            open_tpsls = cursor.fetchall()
-
-            # 2) Iterate and settle
-            for o in open_tpsls:
-                order_id = o['id']
-                symbol = o['symbol']
-                user_id = o['user_id']
-                current_price = price_dict.get(symbol)
-                if current_price is None:
-                    continue
-
-                raw_price = price_dict.get(symbol)
-                if raw_price is None:
-                    continue
-
-                # pull per-symbol decimal places
-                prec = SYMBOL_CFG.get(symbol, {"price": 2, "qty": 3})
-                PRICE_DP = prec['price']
-                QTY_DP = prec['qty']
-
-                # quantize market price
-                current_price = round(raw_price, PRICE_DP)
-
-                # logger.info(f"current price: {current_price}")
-
-                cursor.execute("""
-                    SELECT * FROM `mocktrade`.`position_history`
-                    WHERE user_id = %s
-                    AND symbol = %s
-                    ORDER BY `id` DESC
-                    LIMIT 1
-                    FOR UPDATE
-                """, (user_id, symbol))
-                pos = cursor.fetchone()
-
-                if not pos:
-                    cursor.execute("""
-                        UPDATE mocktrade.order_history
-                           SET `status` = 4
-                         WHERE `id` = %s
-                    """, (order_id,))
-                    logger.error("Cannot find a position of a symbol to apply tp/sl order ")
-                    continue
-
-                tp_sl_type = o['type']  # 'tp' or 'sl'
-                pos_side = pos['side']  # 'buy' (long) or 'sell' (short)
-                exit_price = float(o['exit_price'])
-                pos_status = pos['status']
-                pos_id = pos['id']
-
-                logger.info(f'pos_id: {pos["id"]}')
-
-                # skip if the position is already closed or liquidated
-                if pos_status in (3, 4):
-                    # close all open tp/sl orders for the symbol and continue
-                    cursor.execute("""
-                        UPDATE mocktrade.order_history
-                           SET `status` = 4
-                         WHERE `status` = 0
-                           AND `user_id` = %s
-                           AND `symbol` = %s
-                           AND `id` = %s
-                    """, (user_id, symbol, pos_id))
-                    logger.info("Position is closed; cancelling TP/SL")
-                    continue
-
-                elif pos_status == 1:
-
-                    # 2a) trigger check based on position side + tp/sl
-                    triggered = False
-                    if pos_side == 'buy':
-                        # closing a long
-                        if tp_sl_type == 'tp' and current_price >= exit_price:
-                            triggered = True
-                        if tp_sl_type == 'sl' and current_price <= exit_price:
-                            triggered = True
-                    else:
-                        # closing a short
-                        if tp_sl_type == 'tp' and current_price <= exit_price:
-                            triggered = True
-                        if tp_sl_type == 'sl' and current_price >= exit_price:
-                            triggered = True
-
-                    if not triggered:
-                        continue
-
-                    # --- 2.4) Determine how much to close
-                    or_id = o.get('or_id')
-                    po_id = o.get('po_id')
-                    order_amt = round(float(o['amount']), QTY_DP)
-                    pos_amt = float(pos['amount'])
-
-                    if or_id is None and po_id is not None:
-                        close_amt = pos_amt
-                    else:
-                        close_amt = min(order_amt, pos_amt)
-                    # close_amt = min(order_amt, pos_amt)
-
-                    exec_price = current_price
-                    exec_amount = round(close_amt, QTY_DP)
-                    leverage = float(pos['leverage'])
-                    entry_price = float(pos['entry_price'])
-                    current_margin = float(pos['margin'])
-
-                    # --2.5) Calculate commissions & realize PnL
-                    notional = exec_price * exec_amount
-                    commission = notional * FEE_RATE
-
-                    # 2c) realized PnL based *only* on the position side
-                    if pos_side == 'buy':
-                        gross_pnl = (exec_price - entry_price) * exec_amount
-                    else:
-                        gross_pnl = (entry_price - exec_price) * exec_amount
-                    closed_pnl = gross_pnl - commission
-                    # exec_margin = (exec_price * exec_amount) / lev
-
-                    # persist execution values back to order_history
-                    cursor.execute("""
-                        UPDATE mocktrade.order_history
-                        SET price = %s,
-                        update_time = %s
-                        WHERE `id` = %s
-                    """, (exec_price,
-                          datetime.now(timezone("Asia/Seoul")),
-                          order_id
-                          ))
-
-                    # entry_price = float(pos['entry_price'])
-                    # current_margin = float(pos['margin'])
-                    # old_pnl = float(pos['pnl'])
-                    # lev = float(pos['leverage'])
-                    # # side_of_pos = pos['side']  # reloaded for clarity
-
-                    # forced-liquidation guard
-                    # if this loss would wipe out all margin, liquidate instead of partial/full close
-                    if closed_pnl <= -current_margin:
-                        # mark old as closed
-                        cursor.execute("""
-                            UPDATE mocktrade.position_history
-                            SET status = 2
-                            WHERE symbol = %s
-                            AND user_id = %s
-                        """, symbol, user_id)
-                        #insert a liquidation snapshot
-                        cursor.execute("""
-                            INSERT INTO mocktrade.position_history (
-                                user_id, symbol, size, amount, entry_price,
-                                liq_price, margin, pnl, margin_type,
-                                side, leverage, status, datetime, close_price
-                            ) VALUES (
-                                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-                            )
-                        """, (
-                            user_id,
-                            symbol,
-                            0,  # no remaining
-                            0,
-                            None,
-                            None,
-                            0,
-                            closed_pnl,  # full margin loss
-                            pos['margin_type'],
-                            pos_side,
-                            leverage,
-                            3,  # liquidated status
-                            datetime.now(timezone("Asia/Seoul")),
-                            exec_price
-                        ))
-
-                        # debit user
-                        cursor.execute("""
-                            UPDATE mocktrade.user
-                               SET balance = balance + %s
-                             WHERE id = %s
-                               AND status = 0
-                        """, (closed_pnl, user_id))
-                        # cancel any sibling TP/SLs
-                        cursor.execute("""
-                            UPDATE mocktrade.order_history
-                               SET status = 4
-                             WHERE user_id = %s
-                               AND symbol  = %s
-                               AND type    IN ('tp','sl')
-                        """, (user_id, symbol))
-                        # mark this TP/SL as filled
-                        cursor.execute("""
-                            UPDATE mocktrade.order_history
-                               SET status      = 1,
-                                   update_time = %s
-                             WHERE id = %s
-                        """, (datetime.now(timezone("Asia/Seoul")), order_id))
-                        settled += 1
-                        continue
-
-                    # 2d) compute new position values
-                    new_amt = pos_amt - close_amt
-                    # new_pnl = old_pnl + closed_pnl
-                    # new_pnl = closed_pnl
-                    new_size = new_amt * entry_price
-                    new_margin = new_size / leverage if new_amt > 0 else 0.0
-                    if new_amt > 0:
-                        new_liq = self.calc_iso_liq_price(
-                            entry_price, leverage, pos_side
-                        )
-                        new_status = 1
-                    else:
-                        new_liq = None
-                        new_status = 3
-
-                    # 3) persist position update
-                    cursor.execute("""
-                        UPDATE mocktrade.position_history
-                        SET status = 2
-                        WHERE status = 1
-                        AND user_id = %s
-                        AND symbol = %s   
-                    """, (user_id, symbol))
-
-                    cursor.execute("""
-                        INSERT INTO mocktrade.position_history (
-                            user_id, symbol, size, amount, entry_price, liq_price, margin, pnl, margin_type, 
-                            side, leverage, status, datetime, close_price
-                        ) VALUES (
-                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s       
-                        )
-                    """, (
-                        user_id,
-                        symbol,
-                        round(new_size, PRICE_DP),
-                        round(new_amt, QTY_DP),
-                        entry_price,
-                        new_liq,
-                        round(new_margin, PRICE_DP),
-                        round(closed_pnl, PRICE_DP),
-                        pos['margin_type'],
-                        pos_side,
-                        leverage,
-                        new_status,
-                        datetime.now(timezone('Asia/Seoul')),
-                        exec_price
-                    ))
-
-                    # 4) update user balance
-                    cursor.execute("""
-                        SELECT balance FROM `mocktrade`.`user` 
-                        WHERE id = %s AND `status` = 0
-                        FOR UPDATE
-                    """, (user_id,))
-                    bal = float(cursor.fetchone()['balance'])
-                    cursor.execute("""
-                        UPDATE `mocktrade`.`user`
-                        SET balance     = %s
-                        WHERE id = %s
-                        AND `status` = 0
-                    """, (bal + closed_pnl, user_id))
-
-                    # 5) mark TP/SL order filled
-                    cursor.execute("""
-                            UPDATE mocktrade.order_history
-                               SET `status` = 1,
-                                   `update_time` = %s 
-                             WHERE `id` = %s
-                        """, (datetime.now(timezone('Asia/Seoul')), order_id))
-
-                    # 6) If the position closed, cancel all the related tp/sl orders
-                    if new_status == 3:
-                        cursor.execute("""
-                            UPDATE mocktrade.order_history
-                            SET status = 4
-                            WHERE status = 0
-                            AND user_id = %s
-                            AND symbol = %s
-                        """, (user_id, symbol))
-
-                    # 7) if the triggered tp/sl order is opened from the limit order, close the opposite side order
-                    if or_id:
-                        cursor.execute("""
-                            UPDATE mocktrade.order_history
-                            SET status = 4
-                            WHERE status = 0
-                            AND user_id = %s
-                            AND symbol = %s
-                            AND or_id = %s
-                        """, (user_id, symbol, or_id))
-
-                    logger.info(f"executed tp/sl order with id of: {order_id}")
-                    settled += 1
-
-            conn.commit()
-            return settled
-
-        except Exception:
-            conn.rollback()
-            logger.exception("failed to execute tp/sl order")
-            raise
-
-        finally:
-            conn.close()
-
-
     def settle_tpsl_orders(self):
         conn = None
         cursor = None
@@ -1107,7 +761,6 @@ class TradingService(MySQLAdapter):
 
             price_dict = price_cache
             for order in open_tpsl_orders:
-                # logger.info(f"order: {order}")
                 cursor.execute("SAVEPOINT sp_order")
                 try:
                     order_id = order['id']
@@ -1121,7 +774,6 @@ class TradingService(MySQLAdapter):
                     order_type = order['type']
 
                     current_price = price_dict.get(symbol)
-                    # logger.info(f"current price : {current_price}, symbol: {symbol}")
 
                     if current_price is None:
                         continue
@@ -1182,17 +834,16 @@ class TradingService(MySQLAdapter):
                         FOR UPDATE
                     """, (symbol, user_id))
                     current_position = cursor.fetchone()
-                    # logger.info(f"current position id: {current_position['id']}")
 
                     if current_position['status'] in (3, 4):
                         continue
                     if not current_position:
                         continue
+
                     # 3) Compute new position status
                     new_position = calculate_new_position(current_position, order)
 
                     # 4) Persist new position
-                    # logger.info("setting the previous position status to 2")
                     cursor.execute("""
                         UPDATE mocktrade.position_history
                         SET status = 2
@@ -1202,7 +853,6 @@ class TradingService(MySQLAdapter):
                     """, (user_id, symbol))
 
                     if new_position.get('close'):
-                        # logger.info("position closed. updating the last position")
                         cursor.execute("""
                             UPDATE mocktrade.position_history
                                SET pnl = %s,
@@ -1255,22 +905,12 @@ class TradingService(MySQLAdapter):
 
                     # 5) Update wallet for any realized pnl
                     close_pnl = new_position.get('close_pnl', 0)
-                    # if close_pnl:
-                    #     new_bal = wallet_balance + close_pnl
-                    #     if new_bal < 0:
-                    #         raise RuntimeError("Balance negative")
-                    #     cursor.execute("""
-                    #         UPDATE mocktrade.user
-                    #         SET balance = %s
-                    #         WHERE id = %s AND status = 0
-                    #     """, (new_bal, user_id))
                     if close_pnl:
                         new_bal = max(wallet_balance + close_pnl, 0)
                         cursor.execute(
                             "UPDATE mocktrade.user SET balance = %s WHERE `id` = %s",
                             (new_bal, user_id)
                         )
-
 
                     # 6) Mark this order settled
                     if from_order:
