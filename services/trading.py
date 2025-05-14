@@ -913,12 +913,22 @@ class TradingService(MySQLAdapter):
                         )
 
                     # 6) Mark this order settled
+                    cursor.execute("""
+                        UPDATE mocktrade.order_history
+                        SET status = 1,
+                            `update_time` = %s,
+                            `po_id` = %s
+                        WHERE id = %s
+                    """, (datetime.now(timezone('Asia/Seoul')), current_position.get('id'), order_id,))
+
+                    # mark its pair as closed
                     if from_order:
-                        cursor.execute("""
-                            UPDATE mocktrade.order_history
-                            SET status = 4
-                            WHERE or_id = %s 
-                        """, (order['or_id'],))
+                        if order['or_id'] is not None:
+                            cursor.execute("""
+                                UPDATE mocktrade.order_history
+                                SET status = 4
+                                WHERE or_id = %s AND `id` <> %s
+                            """, (order['or_id'], order['id']))
 
                         cursor.execute("""
                             UPDATE mocktrade.order_history
@@ -927,19 +937,12 @@ class TradingService(MySQLAdapter):
                                AND po_id = %s
                                AND `symbol` = %s
                                AND `user_id` = %s
+                               AND status = 0
                         """, (
                             order['po_id'],
                             symbol,
                             user_id
                         ))
-
-                    cursor.execute("""
-                        UPDATE mocktrade.order_history
-                        SET status = 1,
-                            `update_time` = %s,
-                            `po_id` = %s
-                        WHERE id = %s
-                    """, (datetime.now(timezone('Asia/Seoul')), current_position.get('id'), order_id,))
 
                     # 7) close relevant tp/sl positions
                     if new_position.get('close'):
