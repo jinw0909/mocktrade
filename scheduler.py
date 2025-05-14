@@ -209,9 +209,11 @@ def settle_tpsl_orders():
 # scheduler wiring
 # ————————————————
 scheduler = AsyncIOScheduler(timezone=TZ)
+
+interval_sch = int(config.get('SCHEDULER_INTERVAL'))
 scheduler.add_job(
     run_all_jobs,
-    trigger=IntervalTrigger(minutes=1),
+    trigger=IntervalTrigger(seconds=interval_sch),
     next_run_time=datetime.now(),
     id="orchestrator",
     replace_existing=True
