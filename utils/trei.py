@@ -116,8 +116,9 @@ class MySQLAdapter:
         conn = self._get_connection()
 
         # 현재 시간 datetime 객체로 직접 사용
-        now = datetime.now()
-
+        # now = datetime.now()
+        aaa=datetime.strftime(self.now,"%Y-%m-%d %H:%M:%S")
+        aaa1=datetime.strptime(aaa,"%Y-%m-%d %H:%M:%S")
         try:
             if conn:
                 with conn.cursor() as cursor:
@@ -129,7 +130,7 @@ class MySQLAdapter:
                     cursor.execute(sql, (
                         user_no, symbol, order_type, margin_type, side,
                         price, margin, amount, leverage,
-                        now, now, tp, sl, status, message
+                        aaa1, aaa1, tp, sl, status, message
                     ))
                     conn.commit()
 
@@ -515,6 +516,42 @@ class MySQLAdapter:
         except Exception as e:
             print(e)
             pass 
+    
+    
+    
+    def check_ord_magin_mode(self,user_no,symbol,margin_type):
+        
+        
+        # self.return_dict_data=dict(page=0,size=0,totalPages=0,totalCount=0,results=[], reCode=1, message='Server Error')
+        conn = self._get_connection()
+        check = MakeErrorType()
+        new_list=[]
+       
+        try:
+            if conn:
+                with conn.cursor() as cursor:
+                    
+                    sql = f"SELECT * FROM order_history where user_id={user_no} and symbol='{symbol}' and status=0 and margin_type ='{margin_type}';"
+        
+                
+                    cursor.execute(sql)
+                    result=cursor.fetchall()
+                    result=pd.DataFrame(result)
+                    
+                    
+              
+                    
+                    print(result)
+              
+                    if len(result)>0:
+                        
+                        return True
+                    
+                    else:
+                        return False
+        except Exception as e:
+            print(e)
+            pass 
         
         
     
@@ -804,13 +841,39 @@ class MySQLAdapter:
         margin_type = 'isolated' if margin_type == 0 else 'cross'
         print('user',user_no, 'symbol',symbol,'margin_type', margin_type,'lever', leverage,'price',price,'usdt', usdt,'amount', amount)
         
+        
+        posi,posich=self.get_position_return(user_no,symbol)
+        print('///////////////////////////////////////',posi)
+        print('/////////////////////////////////////',posich)
+        if posich == True:
+            lev=posi['leverage'].iloc[0]
+            print('lev',lev)
+            if margin_type== 'isolated' and (leverage < lev):
+                
+                self.return_dict_data['reCode']=30007
+                self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                self.status_code=423
+        
+                return False
+        
         if    margin_type=='isolated':
             new_margin_type='cross'
         else:
             new_margin_type='isolated'
         price_ch,qty_ch=self.get_qty(symbol)
         check_magin_type=self.check_magin_mode(user_no,symbol,new_margin_type)
+        check_magin_type1=self.check_ord_magin_mode(user_no,symbol,new_margin_type)
         print("check_magin_type",check_magin_type, new_margin_type)
+        
+        if check_magin_type1 ==True:
+            
+            self.return_dict_data['reCode']=103
+            self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+            self.status_code=423
+        
+            return False
+        
+        
         if check_magin_type ==True:
             
             self.return_dict_data['reCode']=103
@@ -900,6 +963,19 @@ class MySQLAdapter:
                         print("new_usdt",new_usdt,usdt)
                         print('usdt',usdt)
                     # 주문 기록 삽입
+                    
+                    
+                    if self.floor_to_n_decimal(new_amount,qty_ch) <=0:
+                        
+                        self.return_dict_data['results']=[]
+                        self.return_dict_data['reCode']=107
+                        self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                        self.status_code=423
+                        
+                        return False
+                    
+                    
+                    
                     if len(position_chck)>0:
                         
                         position_magin=position_chck[0]['size']
@@ -968,13 +1044,38 @@ class MySQLAdapter:
         margin_type = 'isolated' if margin_type == 0 else 'cross'
         print('user',user_no, 'symbol',symbol,'margin_type', margin_type,'lever', leverage,'price',price,'usdt', usdt,'amount', amount)
         
+        
+        posi,posich=self.get_position_return(user_no,symbol)
+        print('///////////////////////////////////////',posi)
+        print('/////////////////////////////////////',posich)
+        if posich == True:
+            lev=posi['leverage'].iloc[0]
+            print('lev',lev)
+            if margin_type== 'isolated' and (leverage < lev):
+                
+                self.return_dict_data['reCode']=30007
+                self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                self.status_code=423
+        
+                return False
+        
         if    margin_type=='isolated':
             new_margin_type='cross'
         else:
             new_margin_type='isolated'
         
         check_magin_type=self.check_magin_mode(user_no,symbol,new_margin_type)
+        check_magin_type1=self.check_ord_magin_mode(user_no,symbol,new_margin_type)
         print("check_magin_type",check_magin_type, new_margin_type)
+        
+        if check_magin_type1 ==True:
+            
+            self.return_dict_data['reCode']=103
+            self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+            self.status_code=423
+        
+            return False
+        
         if check_magin_type ==True:
             
             self.return_dict_data['reCode']=103
@@ -1037,6 +1138,17 @@ class MySQLAdapter:
                         print("new_usdt",new_usdt,usdt)
                         print('usdt',usdt)
                     # 주문 기록 삽입
+                    
+                    if self.floor_to_n_decimal(new_amount,qty_ch) <=0:
+                        
+                        self.return_dict_data['results']=[]
+                        self.return_dict_data['reCode']=107
+                        self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                        self.status_code=423
+                        
+                        return False
+                    
+                    
                     if len(position_chck)>0:
                         
                         position_magin=position_chck[0]['size']
@@ -1102,6 +1214,25 @@ class MySQLAdapter:
         
         
         price_ch,qty_ch=self.get_qty(symbol)
+        
+        posi,posich=self.get_position_return(user_no,symbol)
+        print('///////////////////////////////////////',posi)
+        print('/////////////////////////////////////',posich)
+        if posich == True:
+            lev=posi['leverage'].iloc[0]
+            print('lev',lev)
+            if margin_type== 'isolated' and (leverage < lev):
+                
+                self.return_dict_data['reCode']=30007
+                self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                self.status_code=423
+        
+                return False
+                
+                
+        
+        
+        
         print('-------------------------------------------------------------',price_ch,qty_ch)
         if    margin_type=='isolated':
             new_margin_type='cross'
@@ -1109,7 +1240,15 @@ class MySQLAdapter:
             new_margin_type='isolated'
         
         check_magin_type=self.check_magin_mode(user_no,symbol,new_margin_type)
+        check_magin_type1=self.check_ord_magin_mode(user_no,symbol,new_margin_type)
         print("check_magin_type",check_magin_type, new_margin_type)
+        if check_magin_type1 ==True:
+            
+            self.return_dict_data['reCode']=103
+            self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+            self.status_code=423
+        
+            return False
         
         if check_magin_type ==True:
             
@@ -1203,7 +1342,15 @@ class MySQLAdapter:
                         print('usdt',usdt)
                     # 주문 기록 삽입
                     
-                    
+                    if self.floor_to_n_decimal(new_amount,qty_ch) <=0:
+                        
+                        self.return_dict_data['results']=[]
+                        self.return_dict_data['reCode']=107
+                        self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                        self.status_code=423
+                        
+                        return False
+                        
                     
                     # new_balance=float(balance)-new_usdt
                     
@@ -1358,8 +1505,8 @@ class MySQLAdapter:
                                 self.inser_oder_history(user_no, symbol, 'market', margin_type, 'buy', price, new_usdt ,self.floor_to_n_decimal(new_amount,qty_ch), leverage, 1,price,tp,sl,id)
                                 self.inser_position_history(user_no,symbol,self.floor_to_n_decimal(new_size,price_ch),self.floor_to_n_decimal(quantity,qty_ch),new_price,liq_price,0,new_margin,0,margin_type,'buy',leverage,1,tp1,sl1,0)
                                 self.update_positon(id)
-                                
-                                id=position['id'].iloc[0]   
+                                position2,po=self.get_position_return(user_no,symbol)
+                                id=position2['id'].iloc[0]   
                                 if tp !=0:
                                     print('tp주문')
                                     
@@ -1562,9 +1709,37 @@ class MySQLAdapter:
         else:
             new_margin_type='isolated'
             
+            
+        posi,posich=self.get_position_return(user_no,symbol)
+        print('///////////////////////////////////////',posi)
+        print('/////////////////////////////////////',posich)
+        if posich == True:
+            lev=posi['leverage'].iloc[0]
+            print('lev',lev)
+            if margin_type== 'isolated' and (leverage < lev):
+                
+                self.return_dict_data['reCode']=30007
+                self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                self.status_code=423
+        
+                return False
+                
+            
         price_ch,qty_ch=self.get_qty(symbol)
         check_magin_type=self.check_magin_mode(user_no,symbol,new_margin_type)
+        check_magin_type1=self.check_ord_magin_mode(user_no,symbol,new_margin_type)
         print("check_magin_type",check_magin_type, new_margin_type)
+        
+        if check_magin_type1 ==True:
+            
+            self.return_dict_data['reCode']=103
+            self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+            self.status_code=423
+        
+            return False
+        
+        
+        
         if check_magin_type ==True:
             
             self.return_dict_data['reCode']=103
@@ -1650,7 +1825,14 @@ class MySQLAdapter:
                         print("new_usdt",new_usdt,usdt)
                         print('usdt',usdt)
                     # 주문 기록 삽입
-                    
+                    if self.floor_to_n_decimal(new_amount,qty_ch) <=0:
+                        
+                        self.return_dict_data['results']=[]
+                        self.return_dict_data['reCode']=107
+                        self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                        self.status_code=423
+                        
+                        return False
                     
                     if len(position_chck)>0:
                         
@@ -1797,8 +1979,8 @@ class MySQLAdapter:
                                 self.inser_position_history(user_no,symbol,self.floor_to_n_decimal(new_size,price_ch),self.floor_to_n_decimal(quantity,qty_ch),new_price,liq_price,0,new_margin,0,margin_type,'sell',leverage,1,tp1,sl1,0)  
                                 self.update_positon(id)
                                 
-                                position,po=self.get_position_return(user_no,symbol)
-                                id=position['id'].iloc[0]   
+                                position2,po=self.get_position_return(user_no,symbol)
+                                id=position2['id'].iloc[0]   
                                 if tp !=0:
                                     print('tp주문')
                                     
@@ -2599,6 +2781,7 @@ class MySQLAdapter:
         user = self.get_user(user_no)
         conn = self._get_connection()
         check = MakeErrorType()
+        rd = self._get_redis()
         if not user:
             return  # 사용자 없으면 종료
 
@@ -2613,9 +2796,67 @@ class MySQLAdapter:
             amount = pos_data['amount']
             leverage = pos_data['leverage']
             side=pos_data['side']
-            
+            price = rd.get(f'price:{symbol}USDT')
+            price = float(price.decode())
+            print('price--------------',price)
             update_or_tp,update_ch_tp=self.get_tp_sl_return(user_no,symbol,'tp')
             update_or_sl,update_ch_sl=self.get_tp_sl_return(user_no,symbol,'sl')
+            
+            if side =='buy':
+                
+                
+                if tp != 0:
+                    if price > tp :
+                        
+                        self.return_dict_data['results']=[]
+                        self.return_dict_data['reCode']=30006
+                        self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                        self.status_code=423
+                        
+                        
+                        
+                        return False
+                
+                
+                if sl != 0: 
+                    if price < sl :
+                        self.return_dict_data['results']=[]
+                        self.return_dict_data['reCode']=30006
+                        self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                        self.status_code=423
+                        
+                        return False
+                
+            elif side =='sell':
+                
+                if tp != 0:
+                            
+                    if price < tp :
+                        
+                        self.return_dict_data['results']=[]
+                        self.return_dict_data['reCode']=30006
+                        self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                        self.status_code=423
+                        
+                        
+                        
+                        return False
+                    
+                
+                if sl != 0: 
+                    
+                    if price > sl :
+                        self.return_dict_data['results']=[]
+                        self.return_dict_data['reCode']=30006
+                        self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                        self.status_code=423
+                        
+                        return False
+                                
+                   
+                
+                
+            
             
             print( 'update_or_tp',update_or_tp , update_ch_tp)
             print('update_or_sl',update_or_sl,update_ch_sl )
@@ -2679,6 +2920,8 @@ class MySQLAdapter:
                 else:
                     self.update_order_tp_sl_status(3,id)
                     insert_order_and_update('tp', tp, 'tp',side,0,2)
+                    
+                    
             if update_ch_sl== False:
                 insert_order_and_update('sl', sl, 'sl',side,1,1)
             else:
@@ -2782,7 +3025,84 @@ class MySQLAdapter:
             except Exception as e:
                 print(e)
     
+    
+    
+    def calculate(self,symbol:str,  margin_type: int, leverage: int,side:int,price:float,  amount:float,balance:float):  
+        check = MakeErrorType()
+        # buy
+        margin_type = 'isolated' if margin_type == 0 else 'cross'
+        price_ch,qty_ch=self.get_qty(symbol)
+        if side ==0:
+        
+            if amount > 0:
+                
+                usdt=(amount * price)
+                susu=usdt*0.0004
+                usdt=usdt-susu
+                new_usdt = (amount * price) / leverage -susu # 새로운 USDT 계산
+                new_amount = amount
+                
+                
+                if margin_type=='isolated':
+                                
+                    liq_price=self.floor_to_n_decimal(price * (1 - (1 / leverage)),price_ch)
+                else:
+                    
+                    cross_bal=balance
+                    print('cross_bal',cross_bal)
+                    
+                    maintenance_margin = usdt * 0.005
+                    adjusted_balance = cross_bal - maintenance_margin
 
+                    print(usdt, balance)
+                    liq_price = self.floor_to_n_decimal(price * (1 - adjusted_balance / usdt),price_ch)
+                    if liq_price<0:
+                        liq_price=0
+                new_dict={}
+                new_dict['liq_price']=liq_price
+                
+                self.return_dict_data['results']=new_dict
+                self.return_dict_data['reCode']=0
+                self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                self.status_code=200
+        
+        elif side ==1:
+            
+            
+            if amount > 0:
+                
+                usdt=(amount * price)
+                susu=usdt*0.0004
+                usdt=usdt-susu
+                new_usdt = (amount * price) / leverage -susu # 새로운 USDT 계산
+                new_amount = amount
+                
+                
+                if margin_type=='isolated':
+                    
+                    liq_price = self.floor_to_n_decimal(price * (1 + (1 / leverage)),price_ch)
+                    
+                else:
+                    
+                    cross_bal=balance
+                    print('cross_bal',cross_bal)
+                    maintenance_margin = usdt * 0.005
+                    adjusted_balance = cross_bal - maintenance_margin
+
+                    print(usdt, balance)
+                    liq_price = self.floor_to_n_decimal(price * (1 + adjusted_balance / usdt),price_ch)
+                    if liq_price<0:
+                        liq_price=0
+                new_dict={}
+                new_dict['liq_price']=liq_price
+                    
+                self.return_dict_data['results']=new_dict
+                self.return_dict_data['reCode']=0
+                self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                self.status_code=200
+        
+        
+        return False
 
 
 

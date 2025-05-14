@@ -91,8 +91,8 @@ async def api_select(retri_id: str):
     
     """
     mysql=MySQLAdapter()
-    
-    try:    
+    print(retri_id)
+    try:  
         mysql.reset_user(retri_id)
             
 

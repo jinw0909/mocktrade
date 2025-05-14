@@ -244,7 +244,7 @@ class MySQLAdapter:
                     cursor.execute(sql)
                     result=cursor.fetchall()
                     result=pd.DataFrame(result)
-                    
+                    print(result)
                     new_dict={}
                 if len(result)>0:
                     for i in result.iterrows():
@@ -440,7 +440,7 @@ class MySQLAdapter:
                     cursor.execute(sql)
                     result=cursor.fetchall()
                     result=pd.DataFrame(result)
-                    print(result)
+                    print('///////////////',result)
                 #     new_dict={}
                 if len(result)>0:
                     for i in result.iterrows():
@@ -463,7 +463,7 @@ class MySQLAdapter:
                             new_dict['entry_price']=str(df_data['entry_price'])
                             new_dict['close_price']=str(order['price'].iloc[0])
                             new_dict['close_pnl']=str(df_data['pnl'])
-                            new_dict['close_datetime']=str(df_data['datetime'])
+                            new_dict['close_datetime']=datetime.strftime(order['insert_time'].iloc[0],"%Y-%m-%d %H:%M:%S")
                             
                             # new_dict['amount']=str(df_data['amount'])
                             # # new_dict['side']=str(df_data['side'])
@@ -760,13 +760,13 @@ class MySQLAdapter:
             if conn:
                 with conn.cursor() as cursor:
                     
-                    sql = f"SELECT * FROM user where retri_id={user_no} and status=0 order by datetime desc limit 1"
+                    sql = f"SELECT * FROM user where retri_id='{user_no}' and status=0 order by datetime desc limit 1"
         
                 
                     cursor.execute(sql)
                     result=cursor.fetchall()
                     result=pd.DataFrame(result)
-                    
+                    print(result)
                     if len(result)>0:
                         
                         return result
@@ -924,6 +924,7 @@ class MySQLAdapter:
         try:
             if conn:
                 user=self.get_resetuser_chck(user_no)
+                print('--------------------------------',user)
                 id=user['id'].iloc[0]
                 # self.get_resetuser_update(id)
                 with conn.cursor() as cursor:
@@ -950,8 +951,13 @@ class MySQLAdapter:
                 conn.close()  # 항상 연결 종료            
     
                 
+   
+            
+            
                 
     # def get_pnl_history(self,user_no):
+    
+    
         
         
         
