@@ -323,4 +323,34 @@ async def api_select(user_no: str,position_id:int,tp:float=0,sl:float=0):
     return JSONResponse(mysql.return_dict_data, status_code=mysql.status_code)
 
 
+@router.get('/liq_price', summary='LIQ', tags=['ORDER API'])
+async def api_select(symbol:str,  margin_type: int, leverage: int,side:int,price:float,  amount:float,balance:float):
+
+    
+    """
+    ### margin_type 
+    #### 0 =isolated   
+    #### 1=cross
+    
+    ### side 
+    #### 0 =long   
+    #### 1=short
+    """
+    mysql=MySQLAdapter()
+    
+    try:  
+        
+       
+        mysql.calculate(symbol, margin_type,leverage,side,price, amount,balance)
+            
+        
+
+    except Exception as e:
+        print(e)
+        
+
+    return JSONResponse(mysql.return_dict_data, status_code=mysql.status_code)
+
+
+
 

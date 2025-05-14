@@ -37,7 +37,7 @@ origins = [
     "http://127.0.0.1:8080",
     'http://172.30.1.80:8080',
     'https://hjzheld.github.io',
-    'https://hjzheld.github.io/MainPage/',
+    'https://dominance.retri.xyz',
     'https://dominance.tryex.xyz',
     'https://tryex.xyz'
 ]
