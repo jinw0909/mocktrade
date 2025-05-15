@@ -1242,28 +1242,28 @@ class MySQLAdapter:
 
                         liq_count += 1
 
-                    # 5) survivors 업데이트
-                    remaining = [p for p in cross_positions if p['id'] not in {c[0]['id'] for c in to_liquidate}]
-
-                    for pos in remaining:
-                        maint_other = sum(p['entry_price'] * p['amount'] * 0.01 for p in remaining if p is not pos)
-                        unrealized_pnl = sum(p['unrealized_pnl'] for p in remaining if p is not pos)
-                        buffer_for_pos = cross_equity - maint_other + unrealized_pnl
-
-                        final_liq = compute_cross_liq_price(
-                            entry_price = pos['entry_price'],
-                            amount = pos['amount'],
-                            buffer = buffer_for_pos,
-                            side = pos['side']
-                        )
-                        if final_liq != pos['liq_price']:
-                            cursor.execute("""
-                                UPDATE mocktrade.position_history
-                                SET liq_price = %s
-                                WHERE id = %s
-                            """, (final_liq, pos['id']))
-
-                        row_count += 1
+                    # # 5) survivors 업데이트
+                    # remaining = [p for p in cross_positions if p['id'] not in {c[0]['id'] for c in to_liquidate}]
+                    #
+                    # for pos in remaining:
+                    #     maint_other = sum(p['entry_price'] * p['amount'] * 0.01 for p in remaining if p is not pos)
+                    #     unrealized_pnl = sum(p['unrealized_pnl'] for p in remaining if p is not pos)
+                    #     buffer_for_pos = cross_equity - maint_other + unrealized_pnl
+                    #
+                    #     final_liq = compute_cross_liq_price(
+                    #         entry_price = pos['entry_price'],
+                    #         amount = pos['amount'],
+                    #         buffer = buffer_for_pos,
+                    #         side = pos['side']
+                    #     )
+                    #     if final_liq != pos['liq_price']:
+                    #         cursor.execute("""
+                    #             UPDATE mocktrade.position_history
+                    #             SET liq_price = %s
+                    #             WHERE id = %s
+                    #         """, (final_liq, pos['id']))
+                    #
+                    #     row_count += 1
 
                     cursor.execute("RELEASE SAVEPOINT lqc_order")
 
