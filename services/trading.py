@@ -629,7 +629,7 @@ class TradingService(MySQLAdapter):
                             UPDATE `mocktrade`.`order_history` SET `status` = 4, update_time = %s
                             WHERE `type` IN ('tp', 'sl') AND `user_id` = %s AND `symbol` = %s
                             AND `status` = 0
-                        """, (user_id, datetime.now(timezone('Asia/Seoul')), symbol))
+                        """, (datetime.now(timezone('Asia/Seoul')), user_id, symbol))
 
                     # 8) If tp/sl order was attached
                     if (order["tp"] or order["sl"]) and new_position['amount'] > 0:
