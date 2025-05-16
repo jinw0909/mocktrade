@@ -33,17 +33,23 @@ mysql = MySQLAdapter()
 trader = TradingService()
 
 
-def liquidate_cross():
-
+def calculate_cross():
     try:
-        mysql = MySQLAdapter()
-        result = mysql.liquidate_cross_positions()
-        liq_count = result.get('liq_count', 0)
+        result = mysql.calculate_cross_positions()
         row_count = result.get('row_count', 0)
-        logger.info(f"executing liquidate_cross_position at {datetime.now(timezone('Asia/Seoul'))}. Total {row_count} cross positions liq_price derived and {liq_count} liquidated")
+        logger.info(f"calculating cross position liquidation price at {datetime.now(timezone('Asia/Seoul'))}. Total {row_count} liquidation price derived")
+    except Exception:
+        logger.exception("Error during calculating cross position liquidation price")
+
+
+def liquidate_cross():
+    try:
+        liquidated_positions = mysql.liquidate_cross_positions()
+        user_and_position = [{'user_id': lp['user_id'], 'position_id': lp['position_id']} for lp in liquidated_positions]
+        logger.info(f"executing liquidate_cross_position at {datetime.now(timezone('Asia/Seoul'))}. Total {len(liquidated_positions)} positions liquidated")
+        logger.info(user_and_position)
     except Exception:
         logger.exception("Error during calculating cross margin positions")
-
 
 
 async def run_all_jobs():
@@ -53,7 +59,9 @@ async def run_all_jobs():
     settle_tpsl_orders()
     # await update_position_status_to_redis()
     calculate_upnl()
+    calculate_cross()
     liquidate_cross()
+
 
 def fetch_prices(symbols):
     rd = mysql._get_redis()
@@ -174,6 +182,7 @@ def calculate_upnl():
     except Exception:
         # traceback.print_exc()
         logger.exception("Failed to update prices:")
+
 
 def liquidate_positions():
     try:
