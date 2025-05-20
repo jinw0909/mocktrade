@@ -37,7 +37,8 @@ def calculate_cross():
     try:
         result = mysql.calculate_cross_positions()
         row_count = result.get('row_count', 0)
-        logger.info(f"calculating cross position liquidation price at {datetime.now(timezone('Asia/Seoul'))}. Total {row_count} liquidation price derived")
+        logger.info(
+            f"calculating cross position liquidation price at {datetime.now(timezone('Asia/Seoul'))}. Total {row_count} liquidation price derived")
     except Exception:
         logger.exception("Error during calculating cross position liquidation price")
 
@@ -45,8 +46,10 @@ def calculate_cross():
 def liquidate_cross():
     try:
         liquidated_positions = mysql.liquidate_cross_positions()
-        user_and_position = [{'user_id': lp['user_id'], 'position_id': lp['position_id']} for lp in liquidated_positions]
-        logger.info(f"executing liquidate_cross_position at {datetime.now(timezone('Asia/Seoul'))}. Total {len(liquidated_positions)} positions liquidated")
+        user_and_position = [{'user_id': lp['user_id'], 'position_id': lp['position_id']} for lp in
+                             liquidated_positions]
+        logger.info(
+            f"executing liquidate_cross_position at {datetime.now(timezone('Asia/Seoul'))}. Total {len(liquidated_positions)} positions liquidated")
         logger.info(user_and_position)
     except Exception:
         logger.exception("Error during calculating cross margin positions")
@@ -178,7 +181,8 @@ def calculate_upnl():
     try:
         count = mysql.calculate_unrealized_pnl()
         # print(f'executing calculate_upnl at {datetime.now(timezone("Asia/Seoul"))}. Total {count} number of upnl derived')
-        logger.info(f'executing calculate_upnl at {datetime.now(timezone("Asia/Seoul"))}. Total {count} number of upnl derived')
+        logger.info(
+            f'executing calculate_upnl at {datetime.now(timezone("Asia/Seoul"))}. Total {count} number of upnl derived')
     except Exception:
         # traceback.print_exc()
         logger.exception("Failed to update prices:")
@@ -188,7 +192,8 @@ def liquidate_positions():
     try:
         count = mysql.liquidate_positions()
         # print(f"executing liquidate positions at {datetime.now(timezone('Asia/Seoul'))}. Total {count} number of positions liquidated")
-        logger.info(f"executing liquidate positions at {datetime.now(timezone('Asia/Seoul'))}. Total {count} number of positions liquidated")
+        logger.info(
+            f"executing liquidate positions at {datetime.now(timezone('Asia/Seoul'))}. Total {count} number of positions liquidated")
     except Exception:
         # traceback.print_exc()
         logger.exception("Failed to update prices:")
@@ -198,7 +203,8 @@ def settle_limit_orders():
     try:
         count = trader.settle_limit_orders()
         # print(f"executing settle_limit_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} limit orders settled")
-        logger.info(f"executing settle_limit_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} limit orders settled")
+        logger.info(
+            f"executing settle_limit_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} limit orders settled")
     except Exception:
         # traceback.print_exc()
         logger.exception("Failed to update prices:")
@@ -208,11 +214,13 @@ def settle_tpsl_orders():
     try:
         count = trader.settle_tpsl_orders()
         # print(f"executing settle_tpsl_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} tp/sl orders settled")
-        logger.info(f"executing settle_tpsl_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} tp/sl orders settled")
+        logger.info(
+            f"executing settle_tpsl_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} tp/sl orders settled")
 
     except Exception:
         # traceback.print_exc()
         logger.exception("Failed to settle tp/sl orders")
+
 
 # ————————————————
 # scheduler wiring

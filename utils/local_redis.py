@@ -15,10 +15,9 @@ redis_client = redis.Redis(
     host="localhost", port=6379, db=0, decode_responses=True
 )
 
-
-async def update_position_status_to_redis():
+mysql = MySQLAdapter()
+def update_position_status_to_redis():
     # logger.info("updating position status to the local redis")
-    mysql = MySQLAdapter()
     conn = mysql._get_connection()
     cursor = conn.cursor()
     try:
@@ -77,3 +76,69 @@ async def update_position_status_to_redis():
     finally:
         cursor.close()
         conn.close()
+
+
+def update_position_status_per_user(user_id):
+    conn = None
+    cursor = None
+    try:
+        conn = mysql._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT 
+                ph.user_id,
+                ph.id AS `pos_id`,
+                ph.symbol,
+                ph.entry_price,
+                ph.amount,
+                ph.side
+            FROM mocktrade.position_history as ph
+           WHERE ph.user_id = %s
+             AND ph.status = 1
+        """, (user_id,))
+        position_rows = cursor.fetchall()
+        cursor.execute("""
+            SELECT retri_id
+              FROM mocktrade.user
+             WHERE `id` = %s
+               AND status = 0
+             LIMIT 1
+        """, (user_id,))
+        row = cursor.fetchone()
+        if not row:
+            logger.warning(f"user {user_id} not found")
+            return
+        retri_id = row['retri_id']
+        positions = []
+        for r in position_rows:
+            positions.append({
+                'pos_id': r['pos_id'],
+                'symbol': r['symbol'],
+                'entry_price': r['entry_price'],
+                'amount': float(r['amount']),
+                'side': r['side']
+            })
+
+        positions = [{
+            'pos_id': r['pos_id'],
+            'symbol': r['symbol'],
+            'entry_price': r['entry_price'],
+            'amount': float(r['amount']),
+            'side': r['side']
+        } for r in position_rows]
+
+        key = f"positions:{retri_id}"
+        redis_client.delete(key)
+        mapping = { p['symbol']: json.dumps(p) for p in positions}
+        if mapping:
+            redis_client.hset(key, mapping=mapping)
+
+    except Exception:
+        logger.exception(f"failed to update position of {user_id} to the local redis")
+    finally:
+        if conn:
+            try: conn.close()
+            except: pass
+        if cursor:
+            try: cursor.close()
+            except: pass

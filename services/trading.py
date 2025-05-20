@@ -224,14 +224,18 @@ def calculate_position(current_position, order):
             avg_entry_price = price
         # avg_entry_price = total_value / total_amount
         total_size = total_amount * avg_entry_price
-        total_margin = current_margin + order_margin
+        # total_margin = current_margin + order_margin
+        leverage = max(leverage, current_position.get('leverage', 0))
+        total_margin = (total_size / leverage) if leverage > 0 else current_margin + order_margin
         logger.info(f"current_margin: {current_margin}, order_margin: {order_margin}, total_margin: {total_margin}")
         # 2) guard effective_leverage
-        if total_margin > 0:
-            effective_leverage = total_size / total_margin
-        else:
-            # if somehow margin is zero, fall back to your default leverage
-            effective_leverage = leverage
+        # if total_margin > 0:
+        #     effective_leverage = total_size / total_margin
+        # else:
+        #     # if somehow margin is zero, fall back to your default leverage
+        #     effective_leverage = leverage
+
+
 
         # effective_leverage = total_size / total_margin if total_margin else leverage
 
@@ -251,7 +255,7 @@ def calculate_position(current_position, order):
             # "pnl": current_pnl,
             "pnl": 0,
             "margin": total_margin,
-            "leverage": round(effective_leverage, 4),
+            "leverage": leverage,
             "side": side,
             "margin_type": margin_type,
             "status": 1,
@@ -271,10 +275,12 @@ def calculate_position(current_position, order):
         net_close = close_pnl - fee
         # new_pnl = current_pnl + close_pnl
         new_pnl = close_pnl
-        new_margin = current_margin * (new_amount / current_amount)
+        leverage = current_position.get('leverage', 0)
         new_size = new_amount * current_entry_price
+        new_margin = (new_size / leverage) if leverage > 0 else new_size / current_margin * (new_amount / current_amount)
 
         # effective_leverage = current_size / current_margin if current_margin else leverage
+        leverage = max(order.get('leverage', 0), current_position.get('leverage', 0))
 
         liq_price = calc_iso_liq_price_from_margin(
             current_entry_price,
@@ -290,7 +296,7 @@ def calculate_position(current_position, order):
             "entry_price": current_entry_price,
             "size": new_size,
             "margin": new_margin,
-            "leverage": current_size / current_margin if current_margin else leverage,
+            "leverage": leverage,
             "side": current_side,
             "margin_type": margin_type,
             "pnl": 0,
@@ -436,7 +442,7 @@ class TradingService(MySQLAdapter):
                  WHERE `type`= 'limit'
                    AND `status`= 0
                    AND `amount` > 0
-                ORDER BY `id` DESC
+                ORDER BY `id`
             """)
             open_orders = cursor.fetchall()
 
@@ -457,8 +463,7 @@ class TradingService(MySQLAdapter):
                     # only process fills
                     if current_price is None:
                         continue
-                    if (side == 'buy' and order_price < current_price) or \
-                            (side == 'sell' and order_price > current_price):
+                    if (side == 'buy' and order_price < current_price) or (side == 'sell' and order_price > current_price):
                         continue
 
                     # 1) apply execution-price & recompute margin
@@ -511,7 +516,7 @@ class TradingService(MySQLAdapter):
                         WHERE `status` = 1 AND `user_id` = %s AND `symbol` = %s
                     """, (user_id, symbol))
 
-                    if new_position.get('close'):
+                    if new_position.get('close'):  # full close or flip
                         cursor.execute("""
                             UPDATE mocktrade.position_history
                             SET `status` = 3,
@@ -544,7 +549,16 @@ class TradingService(MySQLAdapter):
                             new_position.get('close_price')
                         ))
 
-                    elif new_position.get('partial'):
+                        # close existing tp/sl orders
+                        cursor.execute("""
+                            UPDATE mocktrade.order_history
+                               SET status = 4
+                             WHERE symbol = %s 
+                               AND user_id = %s
+                               AND status = 0
+                        """, (symbol, user_id))
+
+                    elif new_position.get('partial'):  # partial close
                         cursor.execute("""
                             UPDATE mocktrade.position_history
                                SET pnl = %s,
@@ -622,16 +636,7 @@ class TradingService(MySQLAdapter):
                         WHERE `id` = %s
                     """, (pos_id, datetime.now(timezone('Asia/Seoul')), order_id,))
 
-                    # 7) close relevant tp/sl orders
-                    # if the position being closed, close all the related tp/sl orders
-                    if new_position.get('close'):
-                        cursor.execute("""
-                            UPDATE `mocktrade`.`order_history` SET `status` = 4, update_time = %s
-                            WHERE `type` IN ('tp', 'sl') AND `user_id` = %s AND `symbol` = %s
-                            AND `status` = 0
-                        """, (datetime.now(timezone('Asia/Seoul')), user_id, symbol))
-
-                    # 8) If tp/sl order was attached
+                    # 7) If tp/sl was attached
                     if (order["tp"] or order["sl"]) and new_position['amount'] > 0:
                         logger.info("opening tp/sl orders from the triggered limit order")
                         symbol = order['symbol']
@@ -702,7 +707,7 @@ class TradingService(MySQLAdapter):
                 except Exception:
                     cursor.execute("ROLLBACK TO SAVEPOINT tp_order")
                     cursor.execute("RELEASE SAVEPOINT tp_order")
-                    logger.exception(f"failed processing order {order['id']}, skippping to next")
+                    logger.exception(f"failed processing order {order['id']}, skipping to next")
                     continue
 
             conn.commit()
@@ -835,9 +840,7 @@ class TradingService(MySQLAdapter):
                     """, (symbol, user_id))
                     current_position = cursor.fetchone()
 
-                    if current_position['status'] in (3, 4):
-                        continue
-                    if not current_position:
+                    if current_position['status'] in (3, 4) or not current_position:
                         continue
 
                     # 3) Compute new position status
@@ -898,7 +901,7 @@ class TradingService(MySQLAdapter):
                             new_position.get('entry_price'), new_position.get('liq_price'),
                             new_position.get('margin'),
                             new_position.get('pnl', 0), new_position.get('margin_type'),
-                            new_position.get('side'), new_position.get('leverage'), new_position.get('status'),
+                            new_position.get('side'), current_position.get('leverage', 0), new_position.get('status'),
                             new_position.get('tp', 0), new_position.get('sl', 0), datetime.now(timezone("Asia/Seoul")),
                             0
                         ))

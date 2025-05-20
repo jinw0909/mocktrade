@@ -16,6 +16,7 @@ import pytz
 # from boto3 import client
 from base64 import b64decode
 
+from utils.symbols import symbols as SYMBOL_CFG
 from utils.connection_manager import manager
 from utils.make_error import MakeErrorType
 import pandas as pd
@@ -1057,6 +1058,7 @@ class MySQLAdapter:
         conn = None
         cursor = None
         row_count = 0
+        pending_notifs: list[tuple[str, dict]] = []
         try:
             conn = self._get_connection()
             conn.autocommit(False)
@@ -1079,13 +1081,15 @@ class MySQLAdapter:
                 cursor.execute("SAVEPOINT lqc_calc")
                 try:
                     cursor.execute("""
-                        SELECT balance 
+                        SELECT retri_id, balance 
                           FROM mocktrade.user
                          WHERE id = %s
                            AND status = 0
                     """, (user_id,))
 
-                    wallet_balance = cursor.fetchone().get('balance', 0)
+                    user_row = cursor.fetchone()
+                    wallet_balance = user_row.get('balance', 0)
+                    retri_id = user_row.get('retri_id')
                     # logger.info(f"wallet balance of user {user_id}: {wallet_balance}")
 
                     # frozen margin from isolated positions
@@ -1108,6 +1112,7 @@ class MySQLAdapter:
                     cross_positions = [p for p in positions if p['margin_type'] == 'cross']
                     # logger.info(f"cross positions of user {user_id}: {cross_positions}")
 
+                    updated_positions = []
                     # 청산 대상 탐색
                     for pos in cross_positions:
                         maint_other = sum(p['entry_price'] * p['amount'] * 0.01 for p in cross_positions if p is not pos)
@@ -1120,6 +1125,9 @@ class MySQLAdapter:
                             side=pos['side']
                         )
                         # logger.info(f"maint_other: {maint_other}, unrealized_pnl: {unrealized_pnl}, buffer_for_pos: {buffer_for_pos}, new_liq: {new_liq}")
+                        prec = SYMBOL_CFG.get(pos['symbol'], {"price": 2, "qty": 3})
+                        PRICE_DP = prec["price"]
+                        new_liq = round(new_liq, PRICE_DP)
 
                         # current_price = price_cache.get(pos['symbol'])
                         cursor.execute("""
@@ -1130,6 +1138,21 @@ class MySQLAdapter:
 
                         row_count += 1
 
+                        # collect for WS
+                        updated_positions.append({
+                            "pos_id": pos["id"],
+                            "symbol": pos["symbol"],
+                            "price": new_liq
+                        })
+                    ws_msg = {
+                        "liquidation": "liquidation_price",
+                        "positions": updated_positions
+                    }
+                    pending_notifs.append((
+                        retri_id,
+                        ws_msg
+                    ))
+
                     cursor.execute("RELEASE SAVEPOINT lqc_calc")
 
                 except Exception:
@@ -1139,6 +1162,11 @@ class MySQLAdapter:
                     continue
 
             conn.commit()
+            for user_id, messages in pending_notifs:
+                asyncio.create_task(
+                    manager.notify_user(user_id, messages)
+                )
+
             return { "row_count": row_count }
 
         except Exception:
