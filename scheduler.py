@@ -10,7 +10,9 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from utils.settings import MySQLAdapter  # adjust if your adapter lives elsewhere
 from services.trading import TradingService
-from utils.local_redis import update_position_status_to_redis
+from utils.local_redis import (update_position_status_to_redis,
+                               update_balance_status_to_redis,
+                               update_order_status_to_redis)
 
 from utils.price_cache import prices as price_cache
 from utils.fixed_price_cache import prices as fixed_prices
@@ -240,7 +242,22 @@ scheduler.add_job(
     update_position_status_to_redis,
     trigger=IntervalTrigger(seconds=interval_sec),
     next_run_time=datetime.now(),
-    id="pnlCalculator",
+    id="positionUpdater",
+    replace_existing=True
+)
+interval_order = int(config.get('ORDER_INTERVAL'))
+scheduler.add_job(
+    update_order_status_to_redis,
+    trigger=IntervalTrigger(seconds=interval_order),
+    next_run_time=datetime.now(),
+    id="orderUpdater",
+    replace_existing=True
+)
+scheduler.add_job(
+    update_balance_status_to_redis,
+    trigger=IntervalTrigger(seconds=interval_order),
+    next_run_time=datetime.now(),
+    id="balanceUpdater",
     replace_existing=True
 )
 

@@ -1163,9 +1163,10 @@ class MySQLAdapter:
 
             conn.commit()
             for user_id, messages in pending_notifs:
-                asyncio.create_task(
-                    manager.notify_user(user_id, messages)
-                )
+                if len(messages.get('positions')) > 0:
+                    asyncio.create_task(
+                        manager.notify_user(user_id, messages)
+                    )
 
             return { "row_count": row_count }
 

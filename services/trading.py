@@ -8,6 +8,7 @@ from utils.price_cache import prices as price_cache
 import logging
 from utils.symbols import symbols as SYMBOL_CFG
 from utils.connection_manager import manager
+from utils.local_redis import update_position_status_per_user, update_order_status_per_user, update_balance_status_per_user
 
 logger = logging.getLogger(__name__)
 
@@ -377,7 +378,7 @@ def calculate_position(current_position, order):
             "liq_price": round(liq_price, PRICE_DP),
             "tp": tp,
             "sl": sl,
-            "close": True,
+            "flip": True,
             "close_price": price
         }
 
@@ -426,6 +427,7 @@ class TradingService(MySQLAdapter):
 
         # 1) prepare a place to stash pending notifications
         pending_notifs: list[tuple[str, dict]] = []
+        updated_users = {}
 
         try:
             conn = self._get_connection()
@@ -516,7 +518,21 @@ class TradingService(MySQLAdapter):
                         WHERE `status` = 1 AND `user_id` = %s AND `symbol` = %s
                     """, (user_id, symbol))
 
-                    if new_position.get('close'):  # full close or flip
+                    if new_position.get('close'): # full close
+                        cursor.execute("""
+                            UPDATE mocktrade.position_history
+                               SET `status` = 3,
+                                   `pnl` = %s,
+                                   `datetime` = %s,
+                                   `close_price` = %s
+                             WHERE `id` = %s
+                        """, (
+                            new_position.get('close_pnl', 0),
+                            datetime.now(timezone('Asia/Seoul')),
+                            new_position.get('close_price', 0),
+                            pos_id
+                        ))
+                    elif new_position.get('flip'):  # position flip
                         cursor.execute("""
                             UPDATE mocktrade.position_history
                             SET `status` = 3,
@@ -701,6 +717,9 @@ class TradingService(MySQLAdapter):
                         retri_id,
                         {"trigger": "limit", "order": order}
                     ))
+
+                    updated_users[user_id] = retri_id
+
                     cursor.execute("RELEASE SAVEPOINT tp_order")
                     row_count += 1
 
@@ -720,6 +739,10 @@ class TradingService(MySQLAdapter):
                     manager.notify_user(retri_id, message)
                 )
 
+            for user_id, retri_id in updated_users.items():
+                update_position_status_per_user(user_id, retri_id)
+                update_order_status_per_user(user_id, retri_id)
+                update_balance_status_per_user(user_id)
             return row_count
 
         except Exception:
@@ -738,6 +761,7 @@ class TradingService(MySQLAdapter):
         row_count = 0
 
         pending_notifs : list[tuple[str, dict]] = []
+        updated_users = {}
 
         try:
             conn = self._get_connection()
@@ -962,6 +986,8 @@ class TradingService(MySQLAdapter):
                         retri_id,
                         { "trigger": "tp/sl", "order" : order}
                     ))
+                    updated_users[user_id] = retri_id
+
                     cursor.execute("RELEASE SAVEPOINT sp_order")
                     row_count += 1
                 except Exception:
@@ -976,6 +1002,11 @@ class TradingService(MySQLAdapter):
                 asyncio.create_task(
                     manager.notify_user(user_id, message)
                 )
+            for user_id, retri_id in updated_users.items():
+                update_position_status_per_user(user_id, retri_id)
+                update_order_status_per_user(user_id, retri_id)
+                update_balance_status_per_user(user_id)
+
             return row_count
 
         except Exception:
