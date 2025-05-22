@@ -324,7 +324,7 @@ async def api_select(user_no: str,position_id:int,tp:float=0,sl:float=0):
 
 
 @router.get('/liq_price', summary='LIQ', tags=['ORDER API'])
-async def api_select(symbol:str,  margin_type: int, leverage: int,side:int,price:float,  amount:float,balance:float):
+async def api_select(symbol:str,  margin_type: int, leverage: int,side:int,price:float,  amount:float,balance:float=0):
 
     
     """
