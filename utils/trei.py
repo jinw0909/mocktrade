@@ -1524,19 +1524,38 @@ class MySQLAdapter:
                                 new_size=position['size'].iloc[0]-usdt
                                 quantity=self.floor_to_n_decimal(position['amount'].iloc[0],qty_ch)-self.floor_to_n_decimal(new_amount,qty_ch)
                                 new_price=self.floor_to_n_decimal(new_size/quantity,price_ch)
-                                new_margin=position['margin'].iloc[0]-new_usdt
+                                # new_margin=position['margin'].iloc[0]-new_usdt
+                                # new_margin=quantity*price
+                                # mar=position['size'].iloc[0]/usdt
+                                # new_margin=position['margin'].iloc[0]/mar
                                 tp1=position['tp'].iloc[0]
                                 sl1=position['sl'].iloc[0]
                                 entry_price= position['entry_price'].iloc[0]
                                 new_margin1=position['margin'].iloc[0]
-                                print( '엔트리 프라이스',entry_price,'뉴마진',new_margin1)
+                                lever=position['leverage'].iloc[0]
+                                print( '엔트리 프라이스',entry_price,'뉴마진',new_margin1,';;;;;;;;;;;;;;;;;;;;;;;;;;;;',new_size)
+                                
+                                cc= position['size'].iloc[0]/lever
+                                print('ccccc',cc,cc-position['margin'].iloc[0])
+                                
+                                if leverage !=lever:
+                                    
+                                    self.return_dict_data['reCode']=30007
+                                    self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                                    self.status_code=423
+                            
+                                    return False
+                
+                              
+                                
+                                
                                 
                                 # self.inser_oder_history(user_no, symbol, 'market', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 1,price,tp,sl)
 
                                 if amount >0:
                                     if  quantity <0:
                                         print('amount111111111111111111111111111')
-                                        
+                                        new_margin=position['margin'].iloc[0]-new_usdt
                                         if margin_type=='isolated':
                                 
                                             liq_price=self.floor_to_n_decimal(entry_price * (1 - (1 / leverage)),price_ch)
@@ -1570,6 +1589,15 @@ class MySQLAdapter:
                                         self.cancel_position(user_no,id,new_usdt)
                                     else:
                                         print('amount33333333333333333333333333333333333333333333333')
+                                        if (cc-position['margin'].iloc[0])<-3:
+                                            print('요요요요기111')
+                                            mar=position['size'].iloc[0]/usdt
+                                            new_margin=position['margin'].iloc[0]/mar
+                                            new_margin=position['margin'].iloc[0]-new_margin
+                                            print('mararararararararara',mar,new_margin)
+                                        else:
+                                            print('요요요요기222')
+                                            new_margin=position['margin'].iloc[0]-new_usdt
                                         if margin_type=='isolated':
                                 
                                             liq_price=self.floor_to_n_decimal(entry_price * (1 + (1 / leverage)),price_ch)
@@ -1598,12 +1626,14 @@ class MySQLAdapter:
                                         self.update_bal(new_balance1,user_no) 
                                         
                                         self.inser_oder_history(user_no, symbol, 'market', margin_type, 'buy', price, new_usdt ,self.floor_to_n_decimal(new_amount,qty_ch), leverage, 1,price,tp,sl,id)
-                                        self.inser_position_history(user_no,symbol,self.floor_to_n_decimal(new_size,price_ch),self.floor_to_n_decimal(quantity,qty_ch),entry_price,liq_price,0,new_margin,0,margin_type,'sell',leverage,1,tp1,sl1,0)
+                                        self.inser_position_history(user_no,symbol,abs(self.floor_to_n_decimal(new_size,price_ch)),abs(self.floor_to_n_decimal(quantity,qty_ch)),entry_price,liq_price,0,abs(new_margin),0,margin_type,'sell',leverage,1,tp1,sl1,0)
                                         self.update_positon(id)
                                         self.update_pnl(id,new_profit1,price)
                                 if usdt1 >0:
-                                    if  new_margin <0:
+                                    print('여기까지실행')
+                                    if  new_size <0:
                                         print('111111111111111111111111111')
+                                        new_margin=position['margin'].iloc[0]-new_usdt
                                         if margin_type=='isolated':
                                 
                                             liq_price=self.floor_to_n_decimal(entry_price * (1 - (1 / leverage)),price_ch)
@@ -1631,11 +1661,20 @@ class MySQLAdapter:
                                             print('sl주분')
                                             self.inser_oder_history(user_no, symbol, 'sl', margin_type, 'sell', price, new_usdt ,self.floor_to_n_decimal(new_amount,qty_ch), leverage, 0,price,tp,sl,id)
                                         # self.update_positon(id)
-                                    elif  new_margin==0 :
+                                    elif   new_size==0 or quantity==0:
                                         print('22222222222222222222222222222222')
                                         self.cancel_position(user_no,id,new_usdt)
                                     else:
                                         print('33333333333333333333333333333333333333333333333')
+                                        if (cc-position['margin'].iloc[0])<-3:
+                                            print('요요요요기111')
+                                            mar=position['size'].iloc[0]/usdt
+                                            new_margin=position['margin'].iloc[0]/mar
+                                            new_margin=position['margin'].iloc[0]-new_margin
+                                            print('mararararararararara',mar,new_margin)
+                                        else:
+                                            print('요요요요기2222')
+                                            new_margin=position['margin'].iloc[0]-new_usdt
                                         if margin_type=='isolated':
                                 
                                             liq_price=self.floor_to_n_decimal(entry_price * (1 + (1 / leverage)),price_ch)
@@ -1663,7 +1702,7 @@ class MySQLAdapter:
                                         self.update_bal(new_balance1,user_no) 
                                         
                                         self.inser_oder_history(user_no, symbol, 'market', margin_type, 'buy', price, new_usdt ,self.floor_to_n_decimal(new_amount,qty_ch), leverage, 1,price,tp,sl,id)
-                                        self.inser_position_history(user_no,symbol,self.floor_to_n_decimal(new_size,price_ch),self.floor_to_n_decimal(quantity,qty_ch),entry_price,liq_price,0,new_margin,0,margin_type,'sell',leverage,1,tp1,sl1,0)
+                                        self.inser_position_history(user_no,symbol,abs(self.floor_to_n_decimal(new_size,price_ch)),abs(self.floor_to_n_decimal(quantity,qty_ch)),entry_price,liq_price,0,abs(new_margin),0,margin_type,'sell',leverage,1,tp1,sl1,0)
                                         self.update_positon(id)
                                         self.update_pnl(id,new_profit1,price)
                                         
@@ -2003,16 +2042,24 @@ class MySQLAdapter:
                                 print('**********************',new_size,quantity)
                                 new_price=self.floor_to_n_decimal(new_size/quantity,price_ch)
                                 print('**********************')
-                                new_margin=position['margin'].iloc[0]-new_usdt
+                                # new_margin=position['margin'].iloc[0]-new_usdt
+                
                                 tp1=position['tp'].iloc[0]
                                 sl1=position['sl'].iloc[0]
-                                
+                                lever=position['leverage'].iloc[0]
                                 entry_price= position['entry_price'].iloc[0]
                                 new_margin1=position['margin'].iloc[0]
                                 
-                                print('반대포지션', 'new_size',new_size,'quantity',quantity,'new_margig',new_margin)
-                                
-                               
+                                print('반대포지션', 'new_size',new_size,'quantity',quantity)
+                                cc= position['size'].iloc[0]/lever
+                                print('ccccc',cc,cc-position['margin'].iloc[0])
+                                if leverage !=lever:
+                                    
+                                    self.return_dict_data['reCode']=30007
+                                    self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+                                    self.status_code=423
+                            
+                                    return False
                                 
                             
                                 # self.inser_oder_history(user_no, symbol, 'market', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 1,price,tp,sl)
@@ -2022,7 +2069,7 @@ class MySQLAdapter:
                                     
                                     if  quantity <0:
                                         print('amount111111111111111111111111111111111')
-                                        
+                                        new_margin=position['margin'].iloc[0]-new_usdt
                                         if margin_type=='isolated':
                                
                                 
@@ -2059,6 +2106,15 @@ class MySQLAdapter:
                                         
                                     else:
                                         print('amount3333333333333333333333333333333')
+                                        if (cc-position['margin'].iloc[0])<-3:
+                                            print('요요요요기111')
+                                            mar=position['size'].iloc[0]/usdt
+                                            new_margin=position['margin'].iloc[0]/mar
+                                            new_margin=position['margin'].iloc[0]-new_margin
+                                            print('mararararararararara',mar,new_margin)
+                                        else:
+                                            print('요요요요기2222')
+                                            new_margin=position['margin'].iloc[0]-new_usdt
                                         if margin_type=='isolated':
                                
                                 
@@ -2085,13 +2141,15 @@ class MySQLAdapter:
                                         self.update_bal(new_balance1,user_no)      
                                         # self.close_position(usder_no,id)
                                         self.inser_oder_history(user_no, symbol, 'market', margin_type, 'sell', price, new_usdt ,self.floor_to_n_decimal(new_amount,qty_ch), leverage, 1,price,tp,sl,id)
-                                        self.inser_position_history(user_no,symbol,self.floor_to_n_decimal(new_size,price_ch),self.floor_to_n_decimal(quantity,qty_ch),entry_price,liq_price,0,new_margin,0,margin_type,'buy',leverage,1,tp1,sl1,0)
+                                        self.inser_position_history(user_no,symbol,abs(self.floor_to_n_decimal(new_size,price_ch)),abs(self.floor_to_n_decimal(quantity,qty_ch)),entry_price,liq_price,0,abs(new_margin),0,margin_type,'buy',leverage,1,tp1,sl1,0)
                                         self.update_positon(id)
                                         self.update_pnl(id,new_profit1,price)
+                                        
                                 if usdt1 >0:
-                                    
-                                    if  new_margin <0:
+                                    print('dududududududududu')
+                                    if  new_size <0:
                                         print('111111111111111111111111111111111')
+                                        new_margin=position['margin'].iloc[0]-new_usdt
                                         if margin_type=='isolated':
                                
                                 
@@ -2121,12 +2179,22 @@ class MySQLAdapter:
                                             print('sl주분')
                                             self.inser_oder_history(user_no, symbol, 'sl', margin_type, 'buy', price, new_usdt ,self.floor_to_n_decimal(new_amount,qty_ch), leverage, 0,price,tp,sl,id)
                                                     # self.update_positon(id)
-                                    elif  new_margin ==0.0 :
+                                    elif  new_size ==0.0  or quantity==0:
                                         
                                         print('22222222222222222222222222222222')
                                         self.cancel_position(user_no,id,new_usdt)
                                     else:
                                         print('3333333333333333333333333333333')
+                                        if (cc-position['margin'].iloc[0])<-3:
+                                            print('요요요요기111')
+                                            mar=position['size'].iloc[0]/usdt
+                                            new_margin=position['margin'].iloc[0]/mar
+                                            new_margin=position['margin'].iloc[0]-new_margin
+                                            print('mararararararararara',mar,new_margin)
+                                        else:
+                                            print('요요요요기222')
+                                            new_margin=position['margin'].iloc[0]-new_usdt
+                                        # print(mar,new_margin)
                                         if margin_type=='isolated':
                                
                                 
@@ -2154,7 +2222,7 @@ class MySQLAdapter:
                                         
                                         # self.close_position(usder_no,id)
                                         self.inser_oder_history(user_no, symbol, 'market', margin_type, 'sell', price, new_usdt ,self.floor_to_n_decimal(new_amount,qty_ch), leverage, 1,price,tp,sl,id)
-                                        self.inser_position_history(user_no,symbol,self.floor_to_n_decimal(new_size,price_ch),self.floor_to_n_decimal(quantity,qty_ch),entry_price,liq_price,0,new_margin,0,margin_type,'buy',leverage,1,tp1,sl1,0)
+                                        self.inser_position_history(user_no,symbol,abs(self.floor_to_n_decimal(new_size,price_ch)),abs(self.floor_to_n_decimal(quantity,qty_ch)),entry_price,liq_price,0,abs(new_margin),0,margin_type,'buy',leverage,1,tp1,sl1,0)
                                         self.update_positon(id)
                                         self.update_pnl(id,new_profit1,price)
                             
@@ -3027,25 +3095,27 @@ class MySQLAdapter:
     
     
     
-    def calculate(self,symbol:str,  margin_type: int, leverage: int,side:int,price:float,  amount:float,balance:float):  
+    def calculate(self,symbol:str,  margin_type: int, leverage: int,side:int,price:float,  usdt:float,balance=0):  
         check = MakeErrorType()
         # buy
         margin_type = 'isolated' if margin_type == 0 else 'cross'
         price_ch,qty_ch=self.get_qty(symbol)
+        # 롱 일경우
         if side ==0:
         
-            if amount > 0:
-                
-                usdt=(amount * price)
-                susu=usdt*0.0004
-                usdt=usdt-susu
-                new_usdt = (amount * price) / leverage -susu # 새로운 USDT 계산
-                new_amount = amount
-                
+            if usdt > 0:  # usdt를 사용하는 경우
+                        
+                print('여기')
+                new_usdt = (usdt) / leverage  # 새로운 USDT 계산
+                new_amount = (usdt) / price  # 새로운 금액 계산
+                print("new_amount",new_amount)
+                print("new_usdt",new_usdt)
+        
                 
                 if margin_type=='isolated':
                                 
                     liq_price=self.floor_to_n_decimal(price * (1 - (1 / leverage)),price_ch)
+                    
                 else:
                     
                     cross_bal=balance
@@ -3065,23 +3135,22 @@ class MySQLAdapter:
                 self.return_dict_data['reCode']=0
                 self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
                 self.status_code=200
-        
+        # 숏일경우
         elif side ==1:
             
             
-            if amount > 0:
-                
-                usdt=(amount * price)
-                susu=usdt*0.0004
-                usdt=usdt-susu
-                new_usdt = (amount * price) / leverage -susu # 새로운 USDT 계산
-                new_amount = amount
-                
+            if usdt > 0:  # usdt를 사용하는 경우
+                        
+                print('여기')
+                new_usdt = (usdt) / leverage  # 새로운 USDT 계산
+                new_amount = (usdt) / price  # 새로운 금액 계산
+                print("new_amount",new_amount)
+                print("new_usdt",new_usdt)
                 
                 if margin_type=='isolated':
                     
                     liq_price = self.floor_to_n_decimal(price * (1 + (1 / leverage)),price_ch)
-                    
+                #크로스일경우
                 else:
                     
                     cross_bal=balance
