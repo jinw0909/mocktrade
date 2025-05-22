@@ -47,7 +47,6 @@ def update_position_status_to_redis():
                 "margin": r["margin"],
                 "margin_type": r["margin_type"],
                 "size": r["size"],
-                "unrealized_pnl": r["unrealized_pnl"]
             })
 
         # 3) overwrite each active user's Redis hash
@@ -86,12 +85,8 @@ def update_position_status_per_user(user_id, retri_id):
         cursor = conn.cursor()
         cursor.execute("""
             SELECT 
-                ph.user_id,
-                ph.id AS `pos_id`,
-                ph.symbol,
-                ph.entry_price,
-                ph.amount,
-                ph.side
+                ph.*,
+                ph.id AS `pos_id`
             FROM mocktrade.position_history as ph
            WHERE ph.user_id = %s
              AND ph.status = 1
@@ -113,11 +108,19 @@ def update_position_status_per_user(user_id, retri_id):
             retri_id = row['retri_id']
 
         positions = [{
-            'pos_id': r['pos_id'],
-            'symbol': r['symbol'],
-            'entry_price': r['entry_price'],
-            'amount': float(r['amount']),
-            'side': r['side']
+            # 'pos_id': r['pos_id'],
+            # 'symbol': r['symbol'],
+            # 'entry_price': r['entry_price'],
+            # 'amount': float(r['amount']),
+            # 'side': r['side']
+            "pos_id": r['pos_id'],
+            "symbol": r["symbol"],
+            "entry_price": float(r["entry_price"]),
+            "amount": float(r["amount"]),
+            "side": r["side"],
+            "margin": r["margin"],
+            "margin_type": r["margin_type"],
+            "size": r["size"],
         } for r in position_rows]
 
         key = f"positions:{retri_id}"
