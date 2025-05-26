@@ -1,6 +1,6 @@
 import asyncio
 
-from utils.settings import MySQLAdapter
+from utils.connections import MySQLAdapter
 import traceback
 from datetime import datetime, timedelta
 from pytz import timezone
@@ -420,7 +420,7 @@ def calc_iso_liq_price_from_margin(
 
 class TradingService(MySQLAdapter):
 
-    def settle_limit_orders(self):
+    async def settle_limit_orders(self):
         conn = None
         cursor = None
         row_count = 0
@@ -733,16 +733,18 @@ class TradingService(MySQLAdapter):
 
             # fire all websockets in one batch
             # logger.info(f"pending notifs: {pending_notifs}")
-            for retri_id, message in pending_notifs:
-                # schedule on the same loop
-                asyncio.create_task(
-                    manager.notify_user(retri_id, message)
-                )
-
-            for user_id, retri_id in updated_users.items():
-                update_position_status_per_user(user_id, retri_id)
-                update_order_status_per_user(user_id, retri_id)
-                update_balance_status_per_user(user_id)
+            if pending_notifs:
+                for retri_id, message in pending_notifs:
+                    # schedule on the same loop
+                    await asyncio.create_task(
+                        manager.notify_user(retri_id, message)
+                    )
+            if updated_users:
+                logger.info(f"updated_users: {updated_users}")
+                for user_id, retri_id in updated_users.items():
+                    await update_position_status_per_user(user_id, retri_id)
+                    await update_order_status_per_user(user_id, retri_id)
+                    await update_balance_status_per_user(user_id)
             return row_count
 
         except Exception:
@@ -755,7 +757,7 @@ class TradingService(MySQLAdapter):
             if conn:
                 conn.close()
 
-    def settle_tpsl_orders(self):
+    async def settle_tpsl_orders(self):
         conn = None
         cursor = None
         row_count = 0
@@ -997,15 +999,16 @@ class TradingService(MySQLAdapter):
                     continue
 
             conn.commit()
-
-            for user_id, message in pending_notifs:
-                asyncio.create_task(
-                    manager.notify_user(user_id, message)
-                )
-            for user_id, retri_id in updated_users.items():
-                update_position_status_per_user(user_id, retri_id)
-                update_order_status_per_user(user_id, retri_id)
-                update_balance_status_per_user(user_id)
+            if pending_notifs:
+                for user_id, message in pending_notifs:
+                    await asyncio.create_task(
+                        manager.notify_user(user_id, message)
+                    )
+            if updated_users:
+                for user_id, retri_id in updated_users.items():
+                    await update_position_status_per_user(user_id, retri_id)
+                    await update_order_status_per_user(user_id, retri_id)
+                    await update_balance_status_per_user(user_id)
 
             return row_count
 

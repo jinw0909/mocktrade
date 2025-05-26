@@ -1602,6 +1602,7 @@ class MySQLAdapter:
                                 # self.inser_user_balance(user_no,new_balance)
 
                                 self.inser_position_history(user_no,symbol,self.floor_to_n_decimal(usdt,price_ch),self.floor_to_n_decimal(new_amount,qty_ch),price,liq_price,0,new_usdt,0,margin_type,'buy',leverage,1,0,0,0)
+                                # self.inser_position_history_to_redis(user_no,symbol,self.floor_to_n_decimal(usdt,price_ch))
                                 position,po=self.get_position_return(user_no,symbol)
                                 id=position['id'].iloc[0]
                                 self.inser_oder_history(user_no, symbol, 'market', margin_type, 'buy', price, new_usdt ,self.floor_to_n_decimal(new_amount,qty_ch), leverage, 1,price,tp,sl,id)
@@ -3472,6 +3473,10 @@ class MySQLAdapter:
         
         
         return False
+
+    def inser_position_history_to_redis(self, user_no, symbol, param):
+
+        pass
 
 
 

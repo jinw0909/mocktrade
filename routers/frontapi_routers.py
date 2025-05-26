@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from utils.frontapi import MySQLAdapter,MakeErrorType
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Optional
+from utils.local_redis import update_position_status_per_user, update_order_status_per_user, update_balance_status_per_user
 router= APIRouter()
 
 
@@ -71,7 +72,7 @@ async def api_select(retri_id: str,seed:float):
          
         mysql.get_resetseed(retri_id,seed)
             
- 
+        await update_balance_status_per_user(None, retri_id)
 
 
     except Exception as e:
@@ -94,7 +95,8 @@ async def api_select(retri_id: str):
     print(retri_id)
     try:  
         mysql.reset_user(retri_id)
-            
+
+        await update_balance_status_per_user(None, retri_id)
 
 
     except Exception as e:

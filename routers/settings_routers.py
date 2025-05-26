@@ -8,7 +8,8 @@ from starlette.responses import JSONResponse
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from utils.settings import MySQLAdapter
+from utils.connections import MySQLAdapter
+from services.settings import SettingsService
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Optional
 
@@ -16,23 +17,22 @@ from scheduler import update_all_prices
 from utils.price_cache import prices as price_cache
 from utils.fixed_price_cache import prices
 
-
 router = APIRouter()
 logger = logging.getLogger('uvicorn')
 
+mysql = MySQLAdapter()
+settings = SettingsService()
 
 @router.post('/tpsl', summary='set tp/sl of a single order', tags=['SETTINGS API'])
 async def api_tpsl(order_no: int, user_no: int, tp: float, sl: float):
-    mysql = MySQLAdapter()
-    responseMessage = ''
 
     try:
-        userId = mysql.get_userId(order_no)
+        userId = settings.get_userId(order_no)
         if userId == 0 or userId != user_no:
             logger.error('Invalid Request')
             responseMessage = "Invalid Request"
         else:
-            updateResult = mysql.set_tpsl(order_no, tp, sl)
+            updateResult = settings.set_tpsl(order_no, tp, sl)
             logger.info(f"{updateResult}")
             responseMessage = updateResult
 
@@ -45,20 +45,18 @@ async def api_tpsl(order_no: int, user_no: int, tp: float, sl: float):
 
 @router.post('/getUser', summary='get user test', tags=["SETTINGS API"])
 async def api_getUser(user_no: int):
-    mysql = MySQLAdapter()
     try:
-        user = mysql.get_user(user_no)
+        user = settings.get_user(user_no)
         return user
     except Exception as e:
         logger.exception("failed to get user")
     # return JSONResponse(content = {"message": "reload test"}, status_Code = 200)
 
 
-@router.post('/fetchPrice', summary='fetch crypto price', tags=["SETTINGS API"])
+@router.post('/fetchPriceFromExternal', summary='fetch crypto price from outer source', tags=["SETTINGS API"])
 async def api_fetchPrice():
-    mysql = MySQLAdapter()
     try:
-        fetchResult = mysql.fetch_price()
+        fetchResult = settings.fetch_price()
         return fetchResult
     except Exception as e:
         logger.exception("failed to fetch prices")
@@ -66,7 +64,6 @@ async def api_fetchPrice():
 
 @router.get('/fetchPriceFromRedis', summary='fetch crypto price from redis', tags=["SETTINGS API"])
 async def api_fetchPriceFromRedis(symbol:str):
-    mysql = MySQLAdapter()
     try:
         rd = mysql._get_redis()
         key = f'price:{symbol}USDT'
@@ -110,7 +107,6 @@ async def api_showPriceCache():
 
 @router.get('/createSymbolCache', summary='create the symbol cache', tags=["SETTINGS API"])
 async def api_createSymbolCache():
-    mysql = MySQLAdapter()
     conn = None
     cursor = None
     OUTPUT_PATH = os.path.join(
@@ -144,13 +140,6 @@ async def api_createSymbolCache():
                 continue
             symbol_cache[symbol] = {"price": pi, "qty": qi}
 
-        # prepare the Python file contents
-#         header = '''\
-# # THIS FILE IS AUTO‐GENERATED — do not edit by hand!
-# from typing import Dict
-#
-# symbols: Dict[str, Dict[str, int]] =
-# '''
         header = (
             "# THIS FILE IS AUTO‐GENERATED — do not edit by hand!\n"
             "from typing import Dict\n\n"
@@ -185,77 +174,4 @@ async def api_createSymbolCache():
             except: pass
 
 
-@router.get('/createFixedPriceCache', summary="create fixed price list for local testing", tags=["SETTINGS API"])
-async def api_createFixedPriceCache():
-    mysql = MySQLAdapter()
-    conn = None
-    cursor = None
-    OUTPUT_PATH = os.path.join(
-        os.path.dirname(__file__),
-        '..', 'utils', 'fixed_price_cache.py'
-    )
-    try:
-        conn = mysql._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT symbol, price FROM mocktrade.prices
-        """)
-        rows = cursor.fetchall()
-        # conn.close()
-        # cursor.close()
-        fixed_price_cache = {r['symbol']: r['price'] for r in rows}
-
-#         header = '''\
-# # THIS FILE IS AUTO‐GENERATED — do not edit by hand!
-# from typing import Dict
-#
-# prices: Dict[str, float] =
-# '''
-        header = (
-            "# THIS FILE IS AUTO‐GENERATED — do not edit by hand!\n"
-            "from typing import Dict\n\n"
-            "prices: Dict[str, float] = "
-        )
-        body = pformat(fixed_price_cache, indent=2)
-        content = header + body + '\n'
-        os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
-        with open(OUTPUT_PATH, 'w', encoding='utf-8') as f:
-            f.write(content)
-        print(f'wrote {len(fixed_price_cache)} symbols to {OUTPUT_PATH}')
-        return {
-            "success": True,
-            "cached_symbols": len(fixed_price_cache),
-            "module-path": OUTPUT_PATH
-        }
-    except Exception:
-        if conn:
-            conn.rollback()
-        logger.exception("Failed to create fixed price cache")
-        raise
-    finally:
-        if cursor:
-            try: cursor.close()
-            except: pass
-        if conn:
-            try: conn.close()
-            except: conn.close()
-
-
-@router.post('/modifyFixedPriceCache', summary='modify the price of a symbol in price cache', tags=["SETTINGS API"])
-async def api_modifyFixedPriceCache(symbol: str, price: float):
-    try:
-        prices[symbol] = price
-        return {"success": f"successfully updated the price of {symbol} to {price}"}
-    except Exception as e:
-        traceback.print_exc()
-        logger.exception(f"failed to update price of symbol : {symbol}")
-        raise HTTPException(500, detail=str(e))
-
-
-@router.get('/fixedPriceCache', summary='show fixed price list', tags=["SETTINGS API"])
-async def api_showFixedPriceCache():
-    try:
-        return prices
-    except Exception:
-        logger.exception("Failed to load fixed price list")
 

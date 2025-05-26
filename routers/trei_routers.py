@@ -7,6 +7,7 @@ from utils.trei import MySQLAdapter,MakeErrorType
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Optional
 from models import OrderModel
+from utils.local_redis import update_position_status_per_user, update_order_status_per_user, update_balance_status_per_user
 router= APIRouter()
 
 
@@ -50,14 +51,20 @@ async def api_select(user_no: str, symbol: str, margin_type: int, leverage: int,
           
             user_id=data['id'].iloc[0]
             mysql.buy_limit_order(user_id,symbol,margin_type,leverage,price,usdt,amount,tp,sl)
-            mysql.insert_trade_log(user_id, symbol, 'limit', margin_type, 'buy', price, usdt, amount, leverage, tp,sl,mysql.return_dict_data['reCode'],mysql.return_dict_data['message'])    
+            mysql.insert_trade_log(user_id, symbol, 'limit', margin_type, 'buy', price, usdt, amount, leverage, tp,sl,mysql.return_dict_data['reCode'],mysql.return_dict_data['message'])
+
+            await update_position_status_per_user(user_id, user_no)
+            await update_order_status_per_user(user_id, user_no)
+            await update_balance_status_per_user(user_id)
+
         else:
             
             mysql.return_dict_data['reCode']=105
             mysql.return_dict_data['message'] = check.error(mysql.return_dict_data['reCode'])
             mysql.status_code=423
             mysql.insert_trade_log(user_no, symbol, 'limit', margin_type, 'buy', price, usdt, amount, leverage, tp,sl,mysql.return_dict_data['reCode'],mysql.return_dict_data['message'])    
-            
+
+
 
     except Exception as e:
         print(e)
@@ -84,7 +91,12 @@ async def api_select(user_no: str, symbol: str, margin_type: int, leverage: int,
           
             user_id=data['id'].iloc[0]
             mysql.sell_limit_order(user_id,symbol,margin_type,leverage,price,usdt,amount,tp,sl)
-            mysql.insert_trade_log(user_id, symbol, 'limit', margin_type, 'sell', price, usdt, amount, leverage, tp,sl,mysql.return_dict_data['reCode'],mysql.return_dict_data['message']) 
+            mysql.insert_trade_log(user_id, symbol, 'limit', margin_type, 'sell', price, usdt, amount, leverage, tp,sl,mysql.return_dict_data['reCode'],mysql.return_dict_data['message'])
+
+            await update_position_status_per_user(user_id, user_no)
+            await update_order_status_per_user(user_id, user_no)
+            await update_balance_status_per_user(user_id)
+
         else:
             
             mysql.return_dict_data['reCode']=105
@@ -115,7 +127,12 @@ async def api_select(user_no: str, symbol: str, margin_type: int, leverage: int,
           
             user_id=data['id'].iloc[0]
             mysql.buy_market_order(user_id,symbol,margin_type,leverage,usdt,amount,tp,sl)
-            mysql.insert_trade_log(user_id, symbol, 'market', margin_type, 'buy', mysql.price1, usdt, amount, leverage, tp,sl,mysql.return_dict_data['reCode'],mysql.return_dict_data['message'])    
+            mysql.insert_trade_log(user_id, symbol, 'market', margin_type, 'buy', mysql.price1, usdt, amount, leverage, tp,sl,mysql.return_dict_data['reCode'],mysql.return_dict_data['message'])
+
+            await update_position_status_per_user(user_id, user_no)
+            await update_order_status_per_user(user_id, user_no)
+            await update_balance_status_per_user(user_id)
+
         else:
             
             mysql.return_dict_data['reCode']=105
@@ -147,7 +164,12 @@ async def api_select(user_no: str, symbol: str, margin_type: int, leverage: int,
           
             user_id=data['id'].iloc[0]   
             mysql.sell_market_order(user_id,symbol,margin_type,leverage,usdt,amount,tp,sl)
-            mysql.insert_trade_log(user_id, symbol, 'market', margin_type, 'sell', mysql.price1, usdt, amount, leverage, tp,sl,mysql.return_dict_data['reCode'],mysql.return_dict_data['message'])  
+            mysql.insert_trade_log(user_id, symbol, 'market', margin_type, 'sell', mysql.price1, usdt, amount, leverage, tp,sl,mysql.return_dict_data['reCode'],mysql.return_dict_data['message'])
+
+            await update_position_status_per_user(user_id, user_no)
+            await update_order_status_per_user(user_id, user_no)
+            await update_balance_status_per_user(user_id)
+
         else:
             
             mysql.return_dict_data['reCode']=105
@@ -180,6 +202,8 @@ async def api_select(user_no: str,ordid:int):
             # print('asdasdasdasdsa')
             user_id=data['id'].iloc[0] 
             mysql.cancel_order(user_id,ordid)
+
+            await update_order_status_per_user(user_id, user_no)
         else:
             
             mysql.return_dict_data['reCode']=105
@@ -212,6 +236,8 @@ async def api_select(user_no: str,ordid:OrderModel):
             # print('asdasdasdasdsa',ordid.value)
             user_id=data['id'].iloc[0] 
             mysql.all_cancel_order(user_id,ordid.value)
+
+            await update_order_status_per_user(user_id, user_no)
         else:
             
             mysql.return_dict_data['reCode']=105
@@ -244,6 +270,10 @@ async def api_select(user_no: str,position_id:int):
             
             user_id=data['id'].iloc[0] 
             mysql.cancel_position(user_id,position_id)
+
+            await update_position_status_per_user(user_id, user_no)
+            await update_order_status_per_user(user_id, user_no)
+            await update_balance_status_per_user(user_id)
         else:
             
             mysql.return_dict_data['reCode']=105
@@ -277,6 +307,10 @@ async def api_select(user_no: str):
             
             user_id=data['id'].iloc[0] 
             mysql.all_cancel_position(user_id)
+
+            await update_position_status_per_user(user_id, user_no)
+            await update_order_status_per_user(user_id, user_no)
+            await update_balance_status_per_user(user_id)
         else:
             
             mysql.return_dict_data['reCode']=105
@@ -309,6 +343,9 @@ async def api_select(user_no: str,position_id:int,tp:float=0,sl:float=0):
             
             user_id=data['id'].iloc[0] 
             mysql.update_tpsl_position(user_id,position_id,tp,sl)
+
+            await update_position_status_per_user(user_id, user_no)
+            await update_order_status_per_user(user_id, user_no)
             
         else:
             
@@ -343,7 +380,6 @@ async def api_select(symbol:str,  margin_type: int, leverage: int,side:int,price
        
         mysql.calculate(symbol, margin_type,leverage,side,price, amount,balance)
             
-        
 
     except Exception as e:
         print(e)

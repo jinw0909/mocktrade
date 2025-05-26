@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import FastAPI
 from starlette.responses import JSONResponse
 # from routers import ticker, que_chart, candle, analysis
@@ -15,6 +17,7 @@ from routers import trei_routers, settings_routers, frontapi_routers, websocket_
 
 # import scheduler control
 from scheduler import start_scheduler, shutdown_scheduler
+from services.calculation import CalculationService
 
 import logging
 
@@ -80,6 +83,9 @@ app.include_router(websocket_routers.router, prefix='/ws')
 async def on_startup():
     # spin up the price‐updater
     print("starting job scheduler...")
+    cs = CalculationService()
+    asyncio.create_task(cs.pnl_loop())
+    asyncio.create_task(cs.liq_loop())
     start_scheduler()
 
 

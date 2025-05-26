@@ -1,9 +1,9 @@
 import json
-from utils.settings import MySQLAdapter  # your adapter
+from utils.connections import MySQLAdapter  # your adapter
 import logging  # assume you have a logger
 
 import json
-import redis
+import redis.asyncio as aioredis
 from datetime import datetime
 
 from pytz import timezone
@@ -11,12 +11,12 @@ from pytz import timezone
 logger = logging.getLogger('uvicorn')
 
 # decode_responses=True makes redis return str instead of bytes
-redis_client = redis.Redis(
+redis_client = aioredis.Redis(
     host="localhost", port=6379, db=0, decode_responses=True
 )
 
 mysql = MySQLAdapter()
-def update_position_status_to_redis():
+async def update_position_status_to_redis():
     # logger.info("updating position status to the local redis")
     conn = mysql._get_connection()
     cursor = conn.cursor()
@@ -24,8 +24,9 @@ def update_position_status_to_redis():
         # 1) load all active positions
         cursor.execute("""
             SELECT 
-                   ph.id AS `pos_id`,
-                   ph.*,
+                   ph.`id` AS `pos_id`,
+                   ph.`status` AS `status`,
+                   symbol, size, amount, entry_price, liq_price, margin, pnl, margin_type, side, leverage, tp, sl, close_price, unrealized_pnl, unrealized_pnl_pct,
                    u.retri_id
               FROM `mocktrade`.`position_history` as ph
               JOIN `mocktrade`.`user` AS u
@@ -47,27 +48,30 @@ def update_position_status_to_redis():
                 "margin": r["margin"],
                 "margin_type": r["margin_type"],
                 "size": r["size"],
+                "leverage": r["leverage"],
+                "tp": r["tp"],
+                "sl": r["sl"]
             })
 
         # 3) overwrite each active user's Redis hash
         for uid, pos_list in positions_by_user.items():
             key = f"positions:{uid}"
             # Start by deleting old data for this user
-            redis_client.delete(key)
+            await redis_client.delete(key)
             # Then HSET symbol -> JSON for each position
             mapping = { p["symbol"]: json.dumps(p) for p in pos_list }
             if mapping:
-                redis_client.hset(key, mapping=mapping)
+                await redis_client.hset(key, mapping=mapping)
 
         # 4) remove any leftover "positions:{uid}" keys for users who no longer have active positions
-        for key in redis_client.scan_iter("positions:*"):
+        async for key in redis_client.scan_iter("positions:*"):
             # extract uid portion
             try:
                 _, uid = key.split(":", 1)
             except ValueError:
                 continue
             if uid not in positions_by_user:
-                redis_client.delete(key)
+                await redis_client.delete(key)
 
         logger.info(f"Updated positions for {len(positions_by_user)} users at {datetime.now(timezone('Asia/Seoul'))}")
 
@@ -77,7 +81,7 @@ def update_position_status_to_redis():
         cursor.close()
         conn.close()
 
-def update_position_status_per_user(user_id, retri_id):
+async def update_position_status_per_user(user_id, retri_id):
     conn = None
     cursor = None
     try:
@@ -85,8 +89,8 @@ def update_position_status_per_user(user_id, retri_id):
         cursor = conn.cursor()
         cursor.execute("""
             SELECT 
-                ph.*,
-                ph.id AS `pos_id`
+                ph.`id` AS `pos_id`,
+                symbol, size, amount, entry_price, liq_price, margin, pnl, margin_type, side, leverage, status, tp, sl, close_price, unrealized_pnl, unrealized_pnl_pct
             FROM mocktrade.position_history as ph
            WHERE ph.user_id = %s
              AND ph.status = 1
@@ -121,15 +125,18 @@ def update_position_status_per_user(user_id, retri_id):
             "margin": r["margin"],
             "margin_type": r["margin_type"],
             "size": r["size"],
+            "leverage": r["leverage"],
+            "tp": r["tp"],
+            "sl": r["sl"]
         } for r in position_rows]
 
         key = f"positions:{retri_id}"
-        redis_client.delete(key)
+        await redis_client.delete(key)
         mapping = { p['symbol']: json.dumps(p) for p in positions}
         if mapping:
-            redis_client.hset(key, mapping=mapping)
+            await redis_client.hset(key, mapping=mapping)
 
-        logger.info(f"completed updating position status of user [{user_id}]")
+        logger.info(f"completed updating position status of user [{user_id}] to redis")
 
     except Exception:
         logger.exception(f"failed to update position of {user_id} to the local redis")
@@ -141,7 +148,7 @@ def update_position_status_per_user(user_id, retri_id):
             try: cursor.close()
             except: pass
 
-def update_order_status_to_redis():
+async def update_order_status_to_redis():
     conn = None
     cursor = None
     try:
@@ -150,17 +157,9 @@ def update_order_status_to_redis():
         cursor.execute("""
             SELECT
                  oh.`id` AS `or_id`,
-                 oh.`user_id`,
-                 oh.`symbol`,
-                 oh.`type`,
-                 oh.`margin_type`,
-                 oh.amount,
-                 oh.`price`,
-                 oh.`order_price`,
+                 oh.`status` AS `status`,
                  oh.`magin` AS `margin`,
-                 oh.`side`,
-                 oh.`tp`,
-                 oh.`sl`,
+                 symbol, type, margin_type, side, price, amount, leverage, order_price, po_id, tp, sl,
                  u.`retri_id`
             FROM `mocktrade`.`order_history` AS oh
             JOIN `mocktrade`.`user` AS u 
@@ -191,19 +190,19 @@ def update_order_status_to_redis():
         # overwrite each active user's redis hash
         for uid, order_list in orders_by_user.items():
             key = f"orders:{uid}"
-            redis_client.delete(key)
+            await redis_client.delete(key)
             payload = json.dumps(order_list)
             if payload:
-                redis_client.set(key, payload)
+                await redis_client.set(key, payload)
 
         # remove any leftover positions
-        for key in redis_client.scan_iter("orders:*"):
+        async for key in redis_client.scan_iter("orders:*"):
             try:
                 _, uid = key.split(":", 1)
             except ValueError:
                 continue
             if uid not in orders_by_user:
-                redis_client.delete(key)
+                await redis_client.delete(key)
 
         logger.info(f"Updated orders for {len(orders_by_user)} users at {datetime.now(timezone('Asia/Seoul'))}")
 
@@ -217,7 +216,7 @@ def update_order_status_to_redis():
             try: conn.close()
             except: pass
 
-def update_order_status_per_user(user_id, retri_id):
+async def update_order_status_per_user(user_id, retri_id):
     conn = None
     cursor = None
     try:
@@ -225,9 +224,10 @@ def update_order_status_per_user(user_id, retri_id):
         cursor = conn.cursor()
         cursor.execute("""
             SELECT 
-                oh.*,
-                oh.`id` AS `or_id`,
-                oh.`magin` AS `margin` 
+                 oh.`id` AS `or_id`,
+                 oh.`status` AS `status`,
+                 oh.`magin` AS `margin`,
+                 oh.symbol, type, margin_type, side, price, amount, leverage, order_price, po_id, tp, sl
               FROM `mocktrade`.`order_history` AS oh
              WHERE oh.`user_id` = %s
                AND oh.`status` = 0 
@@ -262,12 +262,12 @@ def update_order_status_per_user(user_id, retri_id):
             'sl': r['sl']} for r in order_rows]
 
         key = f"orders:{retri_id}"
-        redis_client.delete(key)
+        await redis_client.delete(key)
         payload = json.dumps(orders)
         if payload:
-            redis_client.set(key, payload)
+            await redis_client.set(key, payload)
 
-        logger.info(f"completed updating order status of user [{user_id}]")
+        logger.info(f"completed updating order status of user [{user_id}] to redis")
 
     except Exception:
         logger.exception(f"Failed to update the order status of user [{user_id}]")
@@ -279,7 +279,7 @@ def update_order_status_per_user(user_id, retri_id):
             try: conn.close()
             except: pass
 
-def update_balance_status_to_redis():
+async def update_balance_status_to_redis():
     conn = None
     cursor = None
     try:
@@ -302,17 +302,18 @@ def update_balance_status_to_redis():
 
         for uid, balance in balances_by_user.items():
             key = f"balances:{uid}"
-            redis_client.delete(key)
+            await redis_client.delete(key)
             if balance:
-                redis_client.set(key, balance)
+                await redis_client.set(key, balance)
 
-        for key in redis_client.scan_iter("balances:*"):
+        async for key in redis_client.scan_iter("balances:*"):
             try:
                 _, uid = key.split(":", 1)
             except ValueError:
                 continue
             if uid not in balances_by_user:
-                redis_client.delete(key)
+                await redis_client.delete(key)
+                await redis_client.delete(f"availables:{uid}")
 
         logger.info(f"updated balances for {len(balances_by_user)} users at {datetime.now(timezone('Asia/Seoul'))}")
 
@@ -326,12 +327,26 @@ def update_balance_status_to_redis():
             try: conn.close()
             except: pass
 
-def update_balance_status_per_user(user_id):
+async def update_balance_status_per_user(user_id, retri_id = None):
     conn = None
     cursor = None
     try:
         conn = mysql._get_connection()
         cursor = conn.cursor()
+
+        if not user_id:
+            cursor.execute("""
+                SELECT `id`
+                  FROM mocktrade.user
+                 WHERE `retri_id` = %s
+                   AND status = 0
+                 LIMIT 1
+            """, (retri_id, ))
+            row = cursor.fetchone()
+            if not row:
+                logger.exception(f"there is no user with a retri_id of {retri_id}")
+                return
+            user_id = row['user_id']
 
         cursor.execute("""
             SELECT retri_id, balance
@@ -349,10 +364,10 @@ def update_balance_status_per_user(user_id):
         balance = user_row['balance']
 
         key = f"balances:{uid}"
-        redis_client.delete(key)
-        redis_client.set(key, balance)
+        await redis_client.delete(key)
+        await redis_client.set(key, balance)
 
-        logger.info(f"updated balance of user {user_id} to redis ({balance})")
+        logger.info(f"completed updating balance status of user [{user_id}] to redis ({balance})")
 
     except Exception:
         logger.exception(f"failed to update balance of user [{user_id}]")
@@ -363,5 +378,11 @@ def update_balance_status_per_user(user_id):
         if conn:
             try: conn.close()
             except: pass
+
+async def calculate_pnl():
+    try:
+        logger.info("hi")
+    except Exception:
+        logger.exception(f"Failed to calculate the pnl from redis")
 
 

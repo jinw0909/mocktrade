@@ -8,12 +8,13 @@ from pytz import timezone
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
-from utils.settings import MySQLAdapter  # adjust if your adapter lives elsewhere
+from utils.connections import MySQLAdapter  # adjust if your adapter lives elsewhere
 from services.trading import TradingService
+from services.liquidation import LiquidationService
 from utils.local_redis import (update_position_status_to_redis,
                                update_balance_status_to_redis,
                                update_order_status_to_redis)
-
+from services.calculation import CalculationService
 from utils.price_cache import prices as price_cache
 from utils.fixed_price_cache import prices as fixed_prices
 from starlette.config import Config
@@ -33,11 +34,12 @@ SYMBOL_TO_COINGECKO_ID = {
 
 mysql = MySQLAdapter()
 trader = TradingService()
+liquidation = LiquidationService()
+calculation = CalculationService()
 
-
-def calculate_cross():
+async def calculate_cross():
     try:
-        result = mysql.calculate_cross_positions()
+        result = await liquidation.calculate_cross_positions()
         row_count = result.get('row_count', 0)
         logger.info(
             f"calculating cross position liquidation price at {datetime.now(timezone('Asia/Seoul'))}. Total {row_count} liquidation price derived")
@@ -45,9 +47,9 @@ def calculate_cross():
         logger.exception("Error during calculating cross position liquidation price")
 
 
-def liquidate_cross():
+async def liquidate_cross():
     try:
-        liquidated_positions = mysql.liquidate_cross_positions()
+        liquidated_positions = await liquidation.liquidate_cross_positions()
         user_and_position = [{'user_id': lp['user_id'], 'position_id': lp['position_id']} for lp in
                              liquidated_positions]
         logger.info(
@@ -59,18 +61,15 @@ def liquidate_cross():
 
 async def run_all_jobs():
     update_all_prices()
-    liquidate_positions()
-    settle_limit_orders()
-    settle_tpsl_orders()
-    # await update_position_status_to_redis()
-    calculate_upnl()
-    calculate_cross()
-    liquidate_cross()
+    await liquidate_positions()
+    await settle_limit_orders()
+    await settle_tpsl_orders()
+    await calculate_upnl()
+    await calculate_cross()
+    await liquidate_cross()
 
 
 def fetch_prices(symbols):
-    rd = mysql._get_redis()
-    #new_price = rd.get(f'price:{symbol}USDT')
     """
     Batch‐fetch USD prices for a list of symbols via CoinGecko.
     Returns a dict: { "BTC": 83800.12, "ETH": 1850.34, ... }
@@ -179,9 +178,9 @@ def update_all_prices():
     #     conn.close()
 
 
-def calculate_upnl():
+async def calculate_upnl():
     try:
-        count = mysql.calculate_unrealized_pnl()
+        count = await liquidation.calculate_unrealized_pnl()
         # print(f'executing calculate_upnl at {datetime.now(timezone("Asia/Seoul"))}. Total {count} number of upnl derived')
         logger.info(
             f'executing calculate_upnl at {datetime.now(timezone("Asia/Seoul"))}. Total {count} number of upnl derived')
@@ -190,9 +189,9 @@ def calculate_upnl():
         logger.exception("Failed to update prices:")
 
 
-def liquidate_positions():
+async def liquidate_positions():
     try:
-        count = mysql.liquidate_positions()
+        count = await liquidation.liquidate_positions()
         # print(f"executing liquidate positions at {datetime.now(timezone('Asia/Seoul'))}. Total {count} number of positions liquidated")
         logger.info(
             f"executing liquidate positions at {datetime.now(timezone('Asia/Seoul'))}. Total {count} number of positions liquidated")
@@ -201,9 +200,9 @@ def liquidate_positions():
         logger.exception("Failed to update prices:")
 
 
-def settle_limit_orders():
+async def settle_limit_orders():
     try:
-        count = trader.settle_limit_orders()
+        count = await trader.settle_limit_orders()
         # print(f"executing settle_limit_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} limit orders settled")
         logger.info(
             f"executing settle_limit_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} limit orders settled")
@@ -212,9 +211,9 @@ def settle_limit_orders():
         logger.exception("Failed to update prices:")
 
 
-def settle_tpsl_orders():
+async def settle_tpsl_orders():
     try:
-        count = trader.settle_tpsl_orders()
+        count = await trader.settle_tpsl_orders()
         # print(f"executing settle_tpsl_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} tp/sl orders settled")
         logger.info(
             f"executing settle_tpsl_orders at {datetime.now(timezone('Asia/Seoul'))}. Total {count} tp/sl orders settled")
@@ -237,6 +236,7 @@ scheduler.add_job(
     id="orchestrator",
     replace_existing=True
 )
+
 interval_sec = int(config.get('SOCKET_INTERVAL'))
 scheduler.add_job(
     update_position_status_to_redis,
@@ -245,30 +245,31 @@ scheduler.add_job(
     id="positionUpdater",
     replace_existing=True
 )
-interval_order = int(config.get('ORDER_INTERVAL'))
 scheduler.add_job(
     update_order_status_to_redis,
-    trigger=IntervalTrigger(seconds=interval_order),
+    trigger=IntervalTrigger(seconds=interval_sec),
     next_run_time=datetime.now(),
     id="orderUpdater",
     replace_existing=True
 )
 scheduler.add_job(
     update_balance_status_to_redis,
-    trigger=IntervalTrigger(seconds=interval_order),
+    trigger=IntervalTrigger(seconds=interval_sec),
     next_run_time=datetime.now(),
     id="balanceUpdater",
     replace_existing=True
 )
+# scheduler.add_job(
+#     calculation.calculate_pnl,
+#     trigger=IntervalTrigger(seconds=1),
+#     next_run_time=datetime.now(),
+#     id="pnlCalculator",
+#     replace_existing=True
+# )
 
 
 def start_scheduler():
     """Call this on FastAPI startup."""
-    # liquidate_positions()
-    # settle_limit_orders()
-    # settle_tpsl_orders()
-    # calculate_upnl()
-    # update_all_prices()
     scheduler.start()
 
 
