@@ -64,9 +64,9 @@ async def run_all_jobs():
     await liquidate_positions()
     await settle_limit_orders()
     await settle_tpsl_orders()
-    # await calculate_upnl()
-    # await calculate_cross()
-    # await liquidate_cross()
+    await calculate_upnl()
+    await calculate_cross()
+    await liquidate_cross()
 
 
 def fetch_prices(symbols):
