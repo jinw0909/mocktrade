@@ -127,7 +127,7 @@ class CalculationService(MySQLAdapter):
             await pipe.execute()
 
     async def calculate_liq_prices(self):
-        logger.info("Starting global liquidation price calculation")
+        # logger.info("Starting global liquidation price calculation")
 
         position_redis = await self.get_position_redis()
         price_redis = await self.get_price_redis()
