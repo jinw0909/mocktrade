@@ -48,7 +48,7 @@ class CalculationService(MySQLAdapter):
     async def get_price_redis(self):
         if self._price_redis is None:
             self._price_redis = await aioredis.from_url(
-                "redis://localhost:6379/0", decode_responses=True
+                f"redis://{config.get('REDIS_HOST')}:6379/0", decode_responses=True
             )
         return self._price_redis
 
