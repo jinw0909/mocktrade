@@ -229,7 +229,7 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
             # 2) Decide what to send
             payload = None
             if updates:
-                total_pnl = sum(item["pnl"] for item in updates)
+                total_pnl = sum(item.get("pnl") or 0.0 for item in updates)
                 payload   = {"data": updates, "total": total_pnl}
             else:
                 now = time.monotonic()
