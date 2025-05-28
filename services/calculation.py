@@ -981,9 +981,10 @@ class CalculationService(MySQLAdapter):
                 UPDATE mocktrade.order_history
                    SET `status` = 1,
                        `po_id` = %s,
+                       `price` = %s,
                        `update_time` = %s 
                  WHERE `id` = %s
-            """, (current_id, datetime.now(timezone('Asia/Seoul')), order_id))
+            """, (current_id, order['price'], datetime.now(timezone('Asia/Seoul')), order_id))
 
             # 7) If tp/sl was attached
             if (order["tp"] or order["sl"]) and new_position['amount'] > 0:
