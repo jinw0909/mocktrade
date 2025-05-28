@@ -10,9 +10,11 @@ from utils.symbols import symbols as SYMBOL_CFG
 from utils.connection_manager import manager
 from utils.local_redis import update_position_status_per_user, update_order_status_per_user, update_balance_status_per_user
 from collections import defaultdict
+from services.calculation import CalculationService
 
 logger = logging.getLogger(__name__)
 
+calculation = CalculationService()
 
 def compute_cross_liq_price(
         entry_price: float,

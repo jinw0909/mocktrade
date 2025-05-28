@@ -13,7 +13,8 @@ from services.trading import TradingService
 from services.liquidation import LiquidationService
 from utils.local_redis import (update_position_status_to_redis,
                                update_balance_status_to_redis,
-                               update_order_status_to_redis)
+                               update_order_status_to_redis,
+                               update_liq_price)
 from services.calculation import CalculationService
 from utils.price_cache import prices as price_cache
 from utils.fixed_price_cache import prices as fixed_prices
@@ -21,6 +22,7 @@ from starlette.config import Config
 
 config = Config(".env")
 logger = logging.getLogger(__name__)
+logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
 # CoinGecko simple price endpoint
 API_ENDPOINT = "https://api.coingecko.com/api/v3/simple/price"
 TZ = timezone("Asia/Seoul")
@@ -61,12 +63,12 @@ async def liquidate_cross():
 
 async def run_all_jobs():
     update_all_prices()
-    await liquidate_positions()
-    await settle_limit_orders()
-    await settle_tpsl_orders()
-    await calculate_upnl()
-    await calculate_cross()
-    await liquidate_cross()
+    # await liquidate_positions()
+    # await settle_limit_orders()
+    # await settle_tpsl_orders()
+    # await calculate_upnl()
+    # await calculate_cross()
+    # await liquidate_cross()
 
 
 def fetch_prices(symbols):
@@ -189,6 +191,7 @@ async def calculate_upnl():
         logger.exception("Failed to update prices:")
 
 
+
 async def liquidate_positions():
     try:
         count = await liquidation.liquidate_positions()
@@ -223,49 +226,88 @@ async def settle_tpsl_orders():
         logger.exception("Failed to settle tp/sl orders")
 
 
+async def update_status_to_redis():
+    try:
+        logger.info(f"Start updating MySQL status to redis at {datetime.now(timezone('Asia/Seoul'))}")
+        await update_position_status_to_redis()
+        await update_order_status_to_redis()
+        await update_balance_status_to_redis()
+        await update_liq_price()
+    except Exception:
+        logger.exception("Failed to update MySQL status to Redis")
+
+
 # ————————————————
 # scheduler wiring
 # ————————————————
 scheduler = AsyncIOScheduler(timezone=TZ)
 
-interval_sch = int(config.get('SCHEDULER_INTERVAL'))
-scheduler.add_job(
-    run_all_jobs,
-    trigger=IntervalTrigger(seconds=interval_sch),
-    next_run_time=datetime.now(),
-    id="orchestrator",
-    replace_existing=True
-)
-
-interval_sec = int(config.get('SOCKET_INTERVAL'))
-scheduler.add_job(
-    update_position_status_to_redis,
-    trigger=IntervalTrigger(seconds=interval_sec),
-    next_run_time=datetime.now(),
-    id="positionUpdater",
-    replace_existing=True
-)
-scheduler.add_job(
-    update_order_status_to_redis,
-    trigger=IntervalTrigger(seconds=interval_sec),
-    next_run_time=datetime.now(),
-    id="orderUpdater",
-    replace_existing=True
-)
-scheduler.add_job(
-    update_balance_status_to_redis,
-    trigger=IntervalTrigger(seconds=interval_sec),
-    next_run_time=datetime.now(),
-    id="balanceUpdater",
-    replace_existing=True
-)
+# interval_sch = int(config.get('SCHEDULER_INTERVAL'))
 # scheduler.add_job(
-#     calculation.calculate_pnl,
-#     trigger=IntervalTrigger(seconds=1),
+#     run_all_jobs,
+#     trigger=IntervalTrigger(seconds=interval_sch),
 #     next_run_time=datetime.now(),
-#     id="pnlCalculator",
+#     id="orchestrator",
 #     replace_existing=True
 # )
+
+interval_sec = int(config.get('SOCKET_INTERVAL'))
+# scheduler.add_job(
+#     update_position_status_to_redis,
+#     trigger=IntervalTrigger(seconds=interval_sec),
+#     next_run_time=datetime.now(),
+#     id="positionUpdater",
+#     replace_existing=True
+# )
+# scheduler.add_job(
+#     update_order_status_to_redis,
+#     trigger=IntervalTrigger(seconds=interval_sec),
+#     next_run_time=datetime.now(),
+#     id="orderUpdater",
+#     replace_existing=True
+# )
+# scheduler.add_job(
+#     update_balance_status_to_redis,
+#     trigger=IntervalTrigger(seconds=interval_sec),
+#     next_run_time=datetime.now(),
+#     id="balanceUpdater",
+#     replace_existing=True
+# )
+# scheduler.add_job(
+#     update_liq_price,
+#     trigger=IntervalTrigger(seconds=interval_sec),
+#     next_run_time=datetime.now(),
+#     id="liqPriceUpdater",
+#     replace_existing=True
+# )
+scheduler.add_job(
+    update_status_to_redis,
+    trigger=IntervalTrigger(seconds=interval_sec),
+    next_run_time=datetime.now(),
+    id="statusUpdater",
+    replace_existing=True
+)
+scheduler.add_job(
+    calculation.calculate_pnl,
+    trigger=IntervalTrigger(seconds=2),
+    # next_run_time=datetime.now(),
+    id="pnlCalculator",
+    replace_existing=True
+)
+scheduler.add_job(
+    calculation.calculate_liq_prices,
+    trigger=IntervalTrigger(seconds=7),
+    # next_run_time=datetime.now(),
+    id="liqCalculator",
+    replace_existing=True
+)
+scheduler.add_job(
+    calculation.settle_orders,
+    trigger=IntervalTrigger(seconds=5),
+    # next_run_time=datetime.now(),
+    id="orderSettler",
+    replace_existing=True
+)
 
 
 def start_scheduler():

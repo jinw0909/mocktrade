@@ -78,20 +78,18 @@ app.include_router(websocket_routers.router, prefix='/ws')
 # app.include_router(analysis.router, prefix='/analysis', tags=['분석 API'])
 # app.include_router(que_chart.router, prefix='/que', tags=['Que Chart API'])
 # app.include_router(ticker.router, prefix='/ticker', tags=['Ticker API'])
-
+calculation = CalculationService()
 @app.on_event("startup")
 async def on_startup():
     # spin up the price‐updater
     print("starting job scheduler...")
-    cs = CalculationService()
-    asyncio.create_task(cs.pnl_loop())
-    asyncio.create_task(cs.liq_loop())
     start_scheduler()
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
     # clean shutdown of the scheduler
+    await calculation.close()
     shutdown_scheduler()
 
 

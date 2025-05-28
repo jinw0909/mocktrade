@@ -881,7 +881,7 @@ class TradingService(MySQLAdapter):
                         AND symbol = %s                
                     """, (user_id, symbol))
 
-                    if new_position.get('close'):
+                    if new_position.get('close'): # position tp/sl
                         cursor.execute("""
                             UPDATE mocktrade.position_history
                                SET pnl = %s,
@@ -895,8 +895,7 @@ class TradingService(MySQLAdapter):
                             datetime.now(timezone('Asia/Seoul')),
                             current_position.get('id')
                         ))
-                    else:
-                        # partial close
+                    else: # partial close (order tp/sl)
                         cursor.execute("""
                             UPDATE mocktrade.position_history
                                SET pnl = %s,

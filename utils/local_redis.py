@@ -17,7 +17,7 @@ redis_client = aioredis.Redis(
 
 mysql = MySQLAdapter()
 async def update_position_status_to_redis():
-    # logger.info("updating position status to the local redis")
+    logger.info("Updating MySQL position status to the local Redis")
     conn = mysql._get_connection()
     cursor = conn.cursor()
     try:
@@ -26,6 +26,7 @@ async def update_position_status_to_redis():
             SELECT 
                    ph.`id` AS `pos_id`,
                    ph.`status` AS `status`,
+                   ph.`user_id`,
                    symbol, size, amount, entry_price, liq_price, margin, pnl, margin_type, side, leverage, tp, sl, close_price, unrealized_pnl, unrealized_pnl_pct,
                    u.retri_id
               FROM `mocktrade`.`position_history` as ph
@@ -41,8 +42,10 @@ async def update_position_status_to_redis():
             uid = r["retri_id"]
             positions_by_user.setdefault(uid, []).append({
                 "pos_id": r['pos_id'],
+                "user_id": r['user_id'],
                 "symbol": r["symbol"],
                 "entry_price": float(r["entry_price"]),
+                "liq_price": float(r["liq_price"]),
                 "amount": float(r["amount"]),
                 "side": r["side"],
                 "margin": r["margin"],
@@ -63,7 +66,7 @@ async def update_position_status_to_redis():
             if mapping:
                 await redis_client.hset(key, mapping=mapping)
 
-        # 4) remove any leftover "positions:{uid}" keys for users who no longer have active positions
+        # 4) remove any leftover "positions:{uid}" keys for users who no longer have active positions + availables:{uid}
         async for key in redis_client.scan_iter("positions:*"):
             # extract uid portion
             try:
@@ -90,7 +93,7 @@ async def update_position_status_per_user(user_id, retri_id):
         cursor.execute("""
             SELECT 
                 ph.`id` AS `pos_id`,
-                symbol, size, amount, entry_price, liq_price, margin, pnl, margin_type, side, leverage, status, tp, sl, close_price, unrealized_pnl, unrealized_pnl_pct
+                user_id, symbol, size, amount, entry_price, liq_price, margin, pnl, margin_type, side, leverage, status, tp, sl, close_price, unrealized_pnl, unrealized_pnl_pct
             FROM mocktrade.position_history as ph
            WHERE ph.user_id = %s
              AND ph.status = 1
@@ -118,8 +121,10 @@ async def update_position_status_per_user(user_id, retri_id):
             # 'amount': float(r['amount']),
             # 'side': r['side']
             "pos_id": r['pos_id'],
+            'user_id': r['user_id'],
             "symbol": r["symbol"],
             "entry_price": float(r["entry_price"]),
+            "liq_price": float(r["liq_price"]),
             "amount": float(r["amount"]),
             "side": r["side"],
             "margin": r["margin"],
@@ -149,6 +154,7 @@ async def update_position_status_per_user(user_id, retri_id):
             except: pass
 
 async def update_order_status_to_redis():
+    logger.info("Updating MySQL order status to the local Redis")
     conn = None
     cursor = None
     try:
@@ -159,6 +165,7 @@ async def update_order_status_to_redis():
                  oh.`id` AS `or_id`,
                  oh.`status` AS `status`,
                  oh.`magin` AS `margin`,
+                 oh.`user_id`,
                  symbol, type, margin_type, side, price, amount, leverage, order_price, po_id, tp, sl,
                  u.`retri_id`
             FROM `mocktrade`.`order_history` AS oh
@@ -175,22 +182,25 @@ async def update_order_status_to_redis():
             uid = r['retri_id']
             orders_by_user.setdefault(uid, []).append({
                 'or_id': r['or_id'],
+                'user_id': r['user_id'],
                 'symbol': r['symbol'],
                 'price': r['price'],
                 'type': r['type'],
                 'margin_type': r['margin_type'],
                 'margin': r['margin'],
+                'leverage': r['leverage'],
                 'side': r['side'],
                 'order_price': r['order_price'],
                 'amount': r['amount'],
                 'tp': r['tp'],
-                'sl': r['sl']
+                'sl': r['sl'],
+                'po_id': r['po_id']
             })
 
         # overwrite each active user's redis hash
         for uid, order_list in orders_by_user.items():
             key = f"orders:{uid}"
-            await redis_client.delete(key)
+            # await redis_client.delete(key)
             payload = json.dumps(order_list)
             if payload:
                 await redis_client.set(key, payload)
@@ -227,7 +237,7 @@ async def update_order_status_per_user(user_id, retri_id):
                  oh.`id` AS `or_id`,
                  oh.`status` AS `status`,
                  oh.`magin` AS `margin`,
-                 oh.symbol, type, margin_type, side, price, amount, leverage, order_price, po_id, tp, sl
+                 oh.symbol, type, margin_type, side, price, amount, leverage, order_price, po_id, tp, sl, user_id
               FROM `mocktrade`.`order_history` AS oh
              WHERE oh.`user_id` = %s
                AND oh.`status` = 0 
@@ -250,19 +260,23 @@ async def update_order_status_per_user(user_id, retri_id):
 
         orders = [{
             'or_id': r['or_id'],
+            'user_id': r['user_id'],
             'symbol': r['symbol'],
             'price': r['price'],
             'type': r['type'],
             'margin_type': r['margin_type'],
             'margin': r['margin'],
             'side': r['side'],
+            'leverage': r['leverage'],
             'order_price': r['order_price'],
             'amount': r['amount'],
             'tp': r['tp'],
-            'sl': r['sl']} for r in order_rows]
+            'sl': r['sl'],
+            'po_id': r['po_id']
+        } for r in order_rows]
 
         key = f"orders:{retri_id}"
-        await redis_client.delete(key)
+        # await redis_client.delete(key)
         payload = json.dumps(orders)
         if payload:
             await redis_client.set(key, payload)
@@ -280,6 +294,7 @@ async def update_order_status_per_user(user_id, retri_id):
             except: pass
 
 async def update_balance_status_to_redis():
+    logger.info("Updating MySQL balance status to the local Redis")
     conn = None
     cursor = None
     try:
@@ -379,10 +394,56 @@ async def update_balance_status_per_user(user_id, retri_id = None):
             try: conn.close()
             except: pass
 
-async def calculate_pnl():
+async def update_liq_price():
+    logger.info("Uploading cross position liquidation prices to MySQL")
+    conn = None
+    cursor = None
+    row_count = 0
+
     try:
-        logger.info("hi")
+        conn = mysql._get_connection()
+        cursor = conn.cursor()
+
+        async for key in redis_client.scan_iter("liq_prices:*"):
+            raw = await redis_client.get(key)
+            if not raw:
+                continue
+            cursor.execute("SAVEPOINT liq_updt")
+            try:
+                data = json.loads(raw)
+                positions = data.get("positions", [])
+                for pos in positions:
+                    pos_id = pos.get("pos_id")
+                    liq_price = pos.get("liq_price")
+                    if pos_id is None or liq_price is None:
+                        continue
+
+                    cursor.execute("""
+                        UPDATE mocktrade.position_history
+                        SET `liq_price` = %s
+                        WHERE `id` = %s 
+                    """, (liq_price, pos_id))
+
+                    row_count += 1
+
+                cursor.execute("RELEASE SAVEPOINT liq_updt")
+
+            except Exception as e:
+                logger.warning(f"Failed to parse or update {key} : {e}")
+                cursor.execute("ROLLBACK TO SAVEPOINT liq_updt")
+                cursor.execute("RELEASE SAVEPOINT liq_updt")
+                continue
+
+        conn.commit()
+        logger.info(f"Updated {row_count} liquidation prices successfully to MySQL")
+
     except Exception:
-        logger.exception(f"Failed to calculate the pnl from redis")
+        logger.exception("failed to update liq price from redis to MySQL")
+        conn.rollback()
+
+    finally:
+        cursor and cursor.close()
+        conn and conn.close()
+
 
 
