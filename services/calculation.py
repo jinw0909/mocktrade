@@ -693,7 +693,7 @@ class CalculationService(MySQLAdapter):
             if not limit_orders:
                 continue
             # logger.info(f"limit orders of user {user_id} : {limit_orders}")
-            balance_key = f"balances:{user_id}"
+            # balance_key = f"balances:{user_id}"
             pos_key = f"positions:{user_id}"
             try:
                 # wallet_balance = float(await position_redis.get(balance_key) or 0)
@@ -738,6 +738,8 @@ class CalculationService(MySQLAdapter):
                 updated_users[uid] = user_id
 
                 row_count += 1
+
+                break # Settle only one order per user
 
         # Notify users
         for retri_id, message in pending_notifs:
@@ -821,6 +823,8 @@ class CalculationService(MySQLAdapter):
 
                 row_count += 1
 
+                break
+
         for retri_id, message in pending_notifs:
             await asyncio.create_task(manager.notify_user(retri_id, message))
         for user_id, retri_id in updated_users.items():
@@ -868,6 +872,7 @@ class CalculationService(MySQLAdapter):
                      WHERE symbol = %s 
                        AND user_id = %s
                        AND status = 0
+                       AND type IN ('tp', 'sl')
                 """, (symbol, user_id))
 
             elif new_position.get('flip'):
@@ -909,6 +914,7 @@ class CalculationService(MySQLAdapter):
                      WHERE symbol = %s 
                        AND user_id = %s
                        AND status = 0
+                       AND type IN ('tp', 'sl')
                 """, (symbol, user_id))
 
             elif new_position.get('partial'):
@@ -1308,6 +1314,8 @@ class CalculationService(MySQLAdapter):
                         cursor.execute("RELEASE SAVEPOINT lq_order")
                         liquidated += 1
                         logger.info(f"isolated position [{pos_id}] liquidated")
+                        break
+
                     except Exception:
                         cursor.execute("ROLLBACK TO SAVEPOINT lq_order")
                         cursor.execute("RELEASE SAVEPOINT lq_order")
