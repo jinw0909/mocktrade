@@ -1198,6 +1198,7 @@ class CalculationService(MySQLAdapter):
                     WHERE `id` = %s
                     AND `type` = 'tp'
                     AND `user_id` = %s
+                    AND `symbol` = %s
                     AND `status` = 0 
                 """, (
                     order_id - 1,
