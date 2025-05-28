@@ -13,9 +13,6 @@ from services.settings import SettingsService
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Optional
 
-from scheduler import update_all_prices
-from utils.price_cache import prices as price_cache
-from utils.fixed_price_cache import prices
 
 router = APIRouter()
 logger = logging.getLogger('uvicorn')
@@ -73,37 +70,6 @@ async def api_fetchPriceFromRedis(symbol:str):
     except Exception:
         logger.exception("Error during fetching price from redis")
         return "Error during fetching price from redis"
-
-
-@router.get('/updatePriceFromRedis', summary='update all coin prices from redis', tags=["SETTINGS API"])
-async def api_updatePriceFromRedis():
-    try:
-        update_all_prices()
-        print("completed updating from redis")
-        return "completed updating from redis"
-    except Exception:
-        logger.exception("Error during updated prices from redis")
-        return "Error during updating prices from redis"
-
-@router.post('/modifyPriceCache', summary='modify the price of a symbol in price cache', tags=["SETTINGS API"])
-async def api_modifyPriceCache(symbol: str, price: float):
-    try:
-        price_cache[symbol] = price
-        return {"success": f"successfully updated the price of {symbol} to {price}"}
-    except Exception as e:
-        traceback.print_exc()
-        logger.exception(f"failed to update price of symbol : {symbol}")
-        raise HTTPException(500, detail=str(e))
-
-@router.get('/priceCache', summary='show the current price cache', tags=["SETTINGS API"])
-async def api_showPriceCache():
-    try:
-        logger.info("returning the current price cache...")
-        return { "prices": price_cache }
-    except Exception:
-        print("Error, couldn't show the price cache")
-        return {"error": "Failed to show the price cache" }
-
 
 @router.get('/createSymbolCache', summary='create the symbol cache', tags=["SETTINGS API"])
 async def api_createSymbolCache():

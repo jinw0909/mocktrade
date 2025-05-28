@@ -10,7 +10,6 @@ from utils.connections import MySQLAdapter
 import traceback
 from services.trading import TradingService
 from services.settings import SettingsService
-from services.liquidation import LiquidationService
 import logging
 router = APIRouter()
 
@@ -21,7 +20,6 @@ MAINT_RATE = 0.005         # first notional tier: 0.5 %
 trader = TradingService()
 mysql = MySQLAdapter()
 settings = SettingsService()
-liquidation = LiquidationService()
 
 
 def calc_iso_liq_price(entry_price: float,
@@ -34,32 +32,32 @@ def calc_iso_liq_price(entry_price: float,
         return entry_price * (1 + 1/leverage)
 
 
-@router.get('/settleLimitOrders', summary='settle limit orders', tags=['EXECUTE API'])
+@router.get('/settleLimitOrders', summary='settle limit orders', tags=['TRADING API'])
 async def api_settleLimitOrders():
     count = await trader.settle_limit_orders()
     return {"settled orders": count}
 
 
-@router.get('/settleTpslOrders', summary='settle tpsl orders', tags=['EXECUTE API'])
+@router.get('/settleTpslOrders', summary='settle tpsl orders', tags=['TRADING API'])
 async def api_settleTpslOrders():
     count = await trader.settle_tpsl_orders()
     return { "settled orders": count }
 
 
-@router.post('/close', summary='close existing position', tags=["EXECUTE API"])
+@router.post('/close', summary='close existing position', tags=["TRADING API"])
 async def api_closePosition(user_id: int, symbol: str):
     try:
-        query_result = await settings.close_position(user_id, symbol)
+        query_result = await trader.close_position(user_id, symbol)
         return query_result
     except Exception as e:
         print(str(e))
         return {"error": f"Failed to close the existing position {str(e)}"}
 
 
-@router.post('/liquidate', summary='liquidate position where condition met', tags=['EXECUTE API'])
+@router.post('/liquidate', summary='liquidate position where condition met', tags=['TRADING API'])
 async def api_liquidatePositions():
     try:
-        count = await liquidation.liquidate_positions()
+        count = await trader.liquidate_positions()
         return { "number of liquidated positions": count }
     except Exception as e:
         print(str(e))
@@ -67,22 +65,21 @@ async def api_liquidatePositions():
         return {"error": f"Error while liquidating positions: {str(e)}"}
 
 
-@router.post('/liquidateCross', summary="liquidate cross positions if condition met", tags=["EXECUTE API"])
+@router.post('/liquidateCross', summary="liquidate cross positions if condition met", tags=["TRADING API"])
 async def api_liquidateCross():
     try:
-        result = await liquidation.liquidate_cross_positions()
+        result = await trader.liquidate_cross_positions()
         liq_count = result.get('liq_count')
-        row_count = result.get('row_count')
-        logger.info(f"number of positions liquidated: {liq_count}, number of rows updated with liq_price: {row_count}")
-        return {"number of liquidated cross positions": liq_count, "number of rows updated with liq_price" : row_count }
+        logger.info(f"number of positions liquidated: {liq_count}")
+        return {"number of liquidated cross positions": liq_count}
     except Exception:
         logger.exception("Error while liquidating cross positions")
 
 
-@router.post('/calculate_upnl', summary='calculate unrealized pnl of active positions', tags=['EXECUTE API'])
+@router.post('/calculate_upnl', summary='calculate unrealized pnl of active positions', tags=['TRADING API'])
 async def api_calculateUpnl():
     try:
-        count = await liquidation.calculate_unrealized_pnl()
+        count = await trader.calculate_unrealized_pnl()
         return {"number of unrealized pnl derived": count }
     except Exception as e:
         print(str(e))

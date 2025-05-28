@@ -22,7 +22,6 @@ from utils.connection_manager import manager
 import traceback
 from datetime import datetime, timedelta
 from pytz import timezone
-from utils.price_cache import prices as price_cache
 import logging
 from utils.symbols import symbols as SYMBOL_CFG
 from utils.connection_manager import manager
