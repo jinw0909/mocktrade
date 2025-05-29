@@ -1085,7 +1085,7 @@ class TradingService(MySQLAdapter):
                     pass
 
     async def close_position(self, retri_id, symbol):
-        closed_users = {}
+        # closed_users = {}
         try:
             with self._get_connection() as conn, conn.cursor() as cursor:
 
@@ -1125,26 +1125,13 @@ class TradingService(MySQLAdapter):
                 entry_price = float(find_result["entry_price"])
                 amount = float(find_result["amount"])
                 side = find_result["side"]
-                margin = float(find_result['margin'])
-                margin_type = find_result['margin_type']
+                # margin = float(find_result['margin'])
+                # margin_type = find_result['margin_type']
 
-                # 2. Get current price
-                # price_sql = """
-                #     SELECT price FROM mocktrade.prices
-                #     WHERE symbol = %s
-                #     ORDER BY updatedAt DESC
-                #     LIMIT 1
-                # """
-                # cursor.execute(price_sql, (symbol,))
-                # price_result = cursor.fetchone()
-                # if not price_result:
-                #     return {"error": "Price not available"}
-                # current_price = float(price_result["price"])
                 current_price = float(await redis_client.get(f"price:{symbol}USDT"))
                 if current_price is None:
                     logger.error(f"could not find the value of {symbol}")
                     raise RuntimeError(f"Could not find the value of {symbol}")
-
 
                 # 3. calculate pnl
                 if side == 'buy':
@@ -1235,12 +1222,6 @@ class TradingService(MySQLAdapter):
             conn.autocommit(False)
             cursor = conn.cursor()
 
-            # cursor.execute("""
-            #     SELECT symbol, price
-            #     FROM prices
-            # """)
-            # price_dict = {r['symbol']: float(r['price']) for r in cursor.fetchall()}
-
             cursor.execute("""
                 SELECT * 
                   FROM mocktrade.position_history
@@ -1326,9 +1307,9 @@ class TradingService(MySQLAdapter):
                             {"trigger": "liquidation_isolated", "position": pos}
                         ))
                         liquidated_users[user_id] = retri_id
+                        liquidated += 1
 
                         cursor.execute("RELEASE SAVEPOINT lq_order")
-                        liquidated += 1
                 except Exception:
                     cursor.execute("ROLLBACK TO SAVEPOINT lq_order")
                     cursor.execute("RELEASE SAVEPOINT lq_order")

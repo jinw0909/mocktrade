@@ -13,6 +13,14 @@ class ConnectionManager:
         self.active: Dict[str, List[WebSocket]] = {}
 
     async def connect(self, user_id:str, ws: WebSocket):
+        # Close any existing connections
+        for existing_ws in self.active.get(user_id, []):
+            try:
+                await existing_ws.close(code=1000)
+                logger.info(f"[connect] Closed previous connection for user {user_id}")
+            except Exception as e:
+                logger.warning(f"[connect] Failed to close previous socket for {user_id}")
+
         await ws.accept()
         self.active.setdefault(user_id, []).append(ws)
 

@@ -225,7 +225,6 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
                         logger.warning(f"User {user_id} — missing key {e.args[0]} for symbol {symbol}, skipping")
                         continue
 
-
             # 2) Decide what to send
             payload = None
             if updates:

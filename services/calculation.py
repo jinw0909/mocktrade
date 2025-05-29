@@ -180,7 +180,7 @@ def calculate_position(current_position, order):
         fee = abs(close_pnl) * FEE_RATE
         net_close = close_pnl - fee
         # new_pnl = current_pnl + close_pnl
-        new_pnl = close_pnl
+        # new_pnl = close_pnl
         leverage = current_position.get('leverage', 0)
         new_size = new_amount * current_entry_price
         new_margin = (new_size / leverage) if leverage > 0 else new_size / current_margin * (new_amount / current_amount)
@@ -218,11 +218,10 @@ def calculate_position(current_position, order):
     elif amount == current_amount:
         logger.info("case 3-2, opposite side, full close")
         # Full close — no new position
-        close_pnl = (price - current_entry_price) * amount if current_side == 'buy' else (
-                                                                                                 current_entry_price - price) * amount
+        close_pnl = (price - current_entry_price) * amount if current_side == 'buy' else (current_entry_price - price) * amount
         # new_pnl = current_pnl + close_pnl
         fee = abs(close_pnl) * FEE_RATE
-        new_pnl = close_pnl
+        # new_pnl = close_pnl
         net_close = close_pnl - fee
 
         return {
@@ -257,7 +256,6 @@ def calculate_position(current_position, order):
         net_close = close_pnl - fee
         new_value = price * flip_amount
         new_margin = new_value / leverage
-
 
         liq_price = calc_iso_liq_price_from_margin(
             price,
@@ -663,6 +661,7 @@ class CalculationService(MySQLAdapter):
             await asyncio.sleep(7.0)  # every 7 seconds
 
     async def settle_orders(self):
+        logger.info(f"executing settle orders at {datetime.now(timezone('Asia/Seoul'))}")
         position_redis = await self.get_position_redis()
         price_redis = await self.get_price_redis()
         await self.settle_iso_liquidation(position_redis)
@@ -739,7 +738,7 @@ class CalculationService(MySQLAdapter):
 
                 row_count += 1
 
-                break # Settle only one order per user
+                break  # Settle only one order per user
 
         # Notify users
         for retri_id, message in pending_notifs:
@@ -768,10 +767,10 @@ class CalculationService(MySQLAdapter):
             if not tpsl_orders:
                 continue
 
-            balance_key = f"balances:{user_id}"
+            # balance_key = f"balances:{user_id}"
             pos_key = f"positions:{user_id}"
 
-            balance_raw = await position_redis.get(balance_key)
+            # balance_raw = await position_redis.get(balance_key)
             raw_pos = await position_redis.hgetall(pos_key)
 
             try:
@@ -1139,7 +1138,7 @@ class CalculationService(MySQLAdapter):
                 ))
 
             close_pnl = new_position.get('close_pnl', 0)
-            logger.info(f"applying close PnL of {close_pnl} to user [{user_id}] balance")
+            logger.info(f"applying close PnL of {close_pnl} to user [{user_id}]'s wallet")
             if close_pnl:
                 cursor.execute("""
                     UPDATE mocktrade.user 
