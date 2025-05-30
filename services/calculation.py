@@ -1090,7 +1090,7 @@ class CalculationService(MySQLAdapter):
                        AND `user_id` = %s
                        AND `status` = 0
                 """, (symbol, user_id))
-            if new_position.get('close'): # position tp/sl
+            elif new_position.get('close'):  # position tp/sl
                 cursor.execute("""
                     UPDATE mocktrade.position_history
                        SET `pnl` = %s,
