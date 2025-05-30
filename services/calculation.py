@@ -287,6 +287,11 @@ def calculate_position(current_position, order):
 
 
 def calculate_new_position(current_position, order):
+
+    # 1) No existing position ⇒ already closed
+    if not current_position:
+        return {"status": "closed"}
+
     user_id = order['user_id']
     symbol = order['symbol']
     # side = order['side']  # side of the TP/SL order: 'buy' meaning closing a short
@@ -302,9 +307,6 @@ def calculate_new_position(current_position, order):
     PRICE_DP = prec["price"]
     QTY_DP = prec["qty"]
 
-    # 1) No existing position ⇒ already closed
-    if not current_position:
-        return {"status": "closed"}
 
     # unpack current
     cs = current_position['side']  # 'buy' or 'sell'
@@ -806,11 +808,11 @@ class CalculationService(MySQLAdapter):
 
                 exec_price = max(current_price, exit_price) if side == 'sell' else min(current_price, exit_price)
                 order['price'] = exec_price
-                # logger.info(f"exit_price: {order['price']}")
+                logger.info(f"exit_price: {order['price']}")
 
                 current_position = positions.get(symbol)
-                if not current_position:
-                    continue
+                # if not current_position:
+                #     continue
 
                 # Compute new position and persist
                 new_position = calculate_new_position(current_position, order)
@@ -1079,6 +1081,15 @@ class CalculationService(MySQLAdapter):
                    AND `symbol` = %s
             """, (user_id, symbol))
 
+            if new_position.get('status'):
+                cursor.execute("""
+                    UPDATE `mocktrade`.`order_history`
+                       SET `status` = 4
+                     WHERE `type` IN ('tp', 'sl')
+                       AND `symbol` = %s
+                       AND `user_id` = %s
+                       AND `status` = 0
+                """, (symbol, user_id))
             if new_position.get('close'): # position tp/sl
                 cursor.execute("""
                     UPDATE mocktrade.position_history
@@ -1156,25 +1167,12 @@ class CalculationService(MySQLAdapter):
                        `price` = %s,
                        `update_time` = %s
                  WHERE `id` = %s
+                   AND `status` = 0
             """, (
                 order.get('price', 0),
                 datetime.now(timezone('Asia/Seoul')),
                 order_id
             ))
-
-            # cursor.execute("""
-            #     UPDATE mocktrade.order_history
-            #        SET status = 4
-            #      WHERE `type` IN ('tp', 'sl')
-            #        AND po_id = %s
-            #        AND `symbol` = %s
-            #        AND `user_id` = %s
-            #        AND status = 0
-            # """, (
-            #     order['po_id'],
-            #     symbol,
-            #     user_id
-            # ))
 
             # Cancel sibling TP/SL order depending on triggered type
             if order['type'] == 'tp':
