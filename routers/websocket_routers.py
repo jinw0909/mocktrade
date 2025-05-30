@@ -201,8 +201,12 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
             # 1) Read this user's positions (might be empty)
             key       = f"positions:{user_id}"
             positions = await position_redis.hgetall(key)
+            liq_key = f"liq_prices:{user_id}"
 
             updates = []
+            liq_list = []
+            available = 0.0
+
             # only compute updates if there are positions
             if positions:
                 symbols    = list(positions.keys())
@@ -225,11 +229,32 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
                         logger.warning(f"User {user_id} — missing key {e.args[0]} for symbol {symbol}, skipping")
                         continue
 
+                liq_raw = await position_redis.get(liq_key)
+                if liq_raw:
+                    try:
+                        liq_info = json.loads(liq_raw)
+                        available = liq_info.get("available", 0.0)
+                        positions_liq = liq_info.get("positions", [])
+                        for pos in positions_liq:
+                            liq_list.append({
+                                "pos_id": pos["pos_id"],
+                                "symbol": pos["symbol"],
+                                "liq_price": pos["liq_price"]
+                            })
+                    except Exception as e:
+                        logger.warning(f"Failed to parse liquidation info for user {user_id}: {e!r}")
+
+
             # 2) Decide what to send
             payload = None
             if updates:
                 total_pnl = sum(item.get("pnl") or 0.0 for item in updates)
-                payload   = {"data": updates, "total": total_pnl}
+                payload   = {
+                    "data": updates,
+                    "liq": liq_list,
+                    "total": total_pnl,
+                    "avbl": available
+                }
             else:
                 now = time.monotonic()
                 if now - last_heartbeat >= HEARTBEAT_INTERVAL:

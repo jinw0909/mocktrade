@@ -5,14 +5,19 @@ import logging  # assume you have a logger
 import json
 import redis.asyncio as aioredis
 from datetime import datetime
+from starlette.config import Config
 
 from pytz import timezone
 
+config = Config('.env')
 logger = logging.getLogger('uvicorn')
 
 # decode_responses=True makes redis return str instead of bytes
 redis_client = aioredis.Redis(
     host="localhost", port=6379, db=0, decode_responses=True
+)
+price_redis = aioredis.Redis(
+    host=config.get('REDIS_HOST'), port=6379, db=0, decode_responses=True
 )
 
 mysql = MySQLAdapter()
@@ -40,20 +45,54 @@ async def update_position_status_to_redis():
         positions_by_user = {}
         for r in rows:
             uid = r["retri_id"]
+            symbol = r["symbol"]
+            amount = float(r["amount"])
+            entry_price = float(r["entry_price"])
+            side = r["side"]
+            leverage = int(r["leverage"]) if r["leverage"] else 1.0
+            margin_type = r["margin_type"]
+
+            # Get current price from Redis
+            price_key = f"price:{symbol}USDT"
+            price_raw = await price_redis.get(price_key)
+            try:
+                current_price = float(price_raw) if price_raw else entry_price
+            except:
+                current_price = entry_price
+
+            # Recalculate size
+            size = current_price * amount
+            # Recalculate margin if cross
+            margin = float(r["margin"])
+            if margin_type == 'cross' and leverage:
+                margin = size / leverage
+            # Recalculate PnL
+            if side == 'buy':
+                pnl = (current_price - entry_price) * amount
+            else:
+                pnl = (entry_price - current_price) * amount
+
+            pnl_pct = (pnl / (entry_price * amount)) * 100 if entry_price else 0.0
+            roi_pct = (pnl / margin) * 100 if margin else 0.0
+
             positions_by_user.setdefault(uid, []).append({
                 "pos_id": r['pos_id'],
                 "user_id": r['user_id'],
-                "symbol": r["symbol"],
-                "entry_price": float(r["entry_price"]),
+                "symbol": symbol,
+                "entry_price": entry_price,
                 "liq_price": float(r["liq_price"]),
-                "amount": float(r["amount"]),
-                "side": r["side"],
-                "margin": r["margin"],
-                "margin_type": r["margin_type"],
-                "size": r["size"],
-                "leverage": r["leverage"],
+                "current_price": current_price,
+                "amount": amount,
+                "side": side,
+                "margin": margin,
+                "margin_type": margin_type,
+                "size": size,
+                "leverage": leverage,
                 "tp": r["tp"],
-                "sl": r["sl"]
+                "sl": r["sl"],
+                "unrealized_pnl": pnl,
+                "unrealized_pnl_pct": pnl_pct,
+                "roi_pct": roi_pct
             })
 
         # 3) overwrite each active user's Redis hash

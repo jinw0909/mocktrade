@@ -487,6 +487,8 @@ class CalculationService(MySQLAdapter):
                 raw_pos = await position_redis.hgetall(pos_key)
                 positions = [json.loads(p) for p in raw_pos.values()]
                 if not positions:
+                    liq_key = f"liq_prices:{user_id}"
+                    await position_redis.delete(liq_key)
                     continue
 
                 # load balance and orders
