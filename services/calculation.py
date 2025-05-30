@@ -950,6 +950,7 @@ class CalculationService(MySQLAdapter):
                     new_position.get('tp', 0), new_position.get('sl', 0), datetime.now(timezone("Asia/Seoul")),
                     0
                 ))
+
             else:  # same side or new position
                 insert_sql = """
                   INSERT INTO mocktrade.position_history
@@ -1080,7 +1081,7 @@ class CalculationService(MySQLAdapter):
                    AND `symbol` = %s
             """, (user_id, symbol))
 
-            if new_position.get('status'):
+            if new_position.get('status') == 'closed':
                 cursor.execute("""
                     UPDATE `mocktrade`.`order_history`
                        SET `status` = 4
