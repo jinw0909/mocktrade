@@ -81,7 +81,7 @@ async def update_position_status_to_redis():
                 "symbol": symbol,
                 "entry_price": entry_price,
                 "liq_price": float(r["liq_price"]),
-                "current_price": current_price,
+                "market_price": current_price,
                 "amount": amount,
                 "side": side,
                 "margin": margin,
@@ -153,26 +153,55 @@ async def update_position_status_per_user(user_id, retri_id):
                 raise LookupError(f"retri id of user_id={user_id} not found")
             retri_id = row['retri_id']
 
-        positions = [{
-            # 'pos_id': r['pos_id'],
-            # 'symbol': r['symbol'],
-            # 'entry_price': r['entry_price'],
-            # 'amount': float(r['amount']),
-            # 'side': r['side']
-            "pos_id": r['pos_id'],
-            'user_id': r['user_id'],
-            "symbol": r["symbol"],
-            "entry_price": float(r["entry_price"]),
-            "liq_price": float(r["liq_price"]),
-            "amount": float(r["amount"]),
-            "side": r["side"],
-            "margin": r["margin"],
-            "margin_type": r["margin_type"],
-            "size": r["size"],
-            "leverage": r["leverage"],
-            "tp": r["tp"],
-            "sl": r["sl"]
-        } for r in position_rows]
+        positions = []
+        for r in position_rows:
+            symbol = r['symbol']
+            entry_price = float(r['entry_price'])
+            amount = float(r['amount'])
+            side = r['side']
+            leverage = int(r['leverage']) if r['leverage'] else 1
+            margin_type = r['margin_type']
+
+            # Get current price
+            price_key = f"price:{symbol}USDT"
+            price_raw = await price_redis.get(price_key)
+            try:
+                current_price = float(price_raw) if price_raw else entry_price
+            except:
+                current_price = entry_price
+
+            size = current_price * amount
+            margin = float(r['margin'])
+            if margin_type == 'cross' and leverage:
+                margin = size / leverage
+
+            if side == 'buy':
+                pnl = (current_price - entry_price) * amount
+            else:
+                pnl = (entry_price - current_price) * amount
+
+            pnl_pct = (pnl / (entry_price * amount)) * 100 if entry_price else 0.0
+            roi_pct = (pnl / margin) if margin else 0.0
+
+            positions.append({
+                "pos_id": r["pos_id"],
+                "user_id": r["user_id"],
+                "symbol": symbol,
+                "entry_price": entry_price,
+                "liq_price": float(r["liq_price"]),
+                "market_price": current_price,
+                "amount": amount,
+                "side": side,
+                "margin": margin,
+                "margin_type": margin_type,
+                "size": size,
+                "leverage": leverage,
+                "tp": r["tp"],
+                "sl": r["sl"],
+                "unrealized_pnl": pnl,
+                "unrealized_pnl_pct": pnl_pct,
+                "roi_pct": roi_pct
+            })
 
         key = f"positions:{retri_id}"
         await redis_client.delete(key)

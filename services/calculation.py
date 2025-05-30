@@ -620,12 +620,11 @@ class CalculationService(MySQLAdapter):
                         await position_redis.set(bal_key, new_balance)
 
                         # 5. send socket message to inform liquidation
-                        await asyncio.create_task(
-                            manager.notify_user(
+                        await manager.notify_user(
                                 user_id,
                                 { "trigger" : "liquidation_cross", "pos": to_liquidate }
                             )
-                        )
+
 
                     except Exception:
                         conn.rollback()
@@ -746,7 +745,7 @@ class CalculationService(MySQLAdapter):
 
         # Notify users
         for retri_id, message in pending_notifs:
-            await asyncio.create_task(manager.notify_user(retri_id, message))
+            await manager.notify_user(retri_id, message)
         for user_id, retri_id in updated_users.items():
             await update_position_status_per_user(user_id, retri_id)
             await update_order_status_per_user(user_id, retri_id)
@@ -829,7 +828,7 @@ class CalculationService(MySQLAdapter):
                 break
 
         for retri_id, message in pending_notifs:
-            await asyncio.create_task(manager.notify_user(retri_id, message))
+            await manager.notify_user(retri_id, message)
         for user_id, retri_id in updated_users.items():
             await update_position_status_per_user(user_id, retri_id)
             await update_order_status_per_user(user_id, retri_id)
@@ -1323,7 +1322,7 @@ class CalculationService(MySQLAdapter):
 
             conn.commit()
             for retri_id, message in pending_notifs:
-                await asyncio.create_task(manager.notify_user(retri_id, message))
+                await manager.notify_user(retri_id, message)
             for user_id, retri_id in liquidated_users.items():
                 await update_position_status_per_user(user_id, retri_id)
                 await update_order_status_per_user(user_id, retri_id)

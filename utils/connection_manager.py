@@ -33,6 +33,7 @@ class ConnectionManager:
 
     async def notify_user(self, user_id: str, message: dict):
         """Send a JSON message to every WS for that user"""
+        logger.info(f"Sending WS to {user_id}: {message}")
         payload = jsonable_encoder(message)
         for ws in list(self.active.get(user_id, [])):
             try:
