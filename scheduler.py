@@ -119,7 +119,7 @@ async def update_status_to_redis():
 # ————————————————
 scheduler = AsyncIOScheduler(timezone=TZ)
 
-interval_sec = int(config.get('SOCKET_INTERVAL'))
+interval_sec = int(config.get('STATUS_INTERVAL'))
 scheduler.add_job(
     update_status_to_redis,
     trigger=IntervalTrigger(seconds=interval_sec),
@@ -127,23 +127,26 @@ scheduler.add_job(
     id="statusUpdater",
     replace_existing=True
 )
+pnl_sec = int(config.get('PNL_INTERVAL'))
 scheduler.add_job(
     calculation.calculate_pnl,
-    trigger=IntervalTrigger(seconds=2),
+    trigger=IntervalTrigger(seconds=pnl_sec),
     # next_run_time=datetime.now(),
     id="pnlCalculator",
     replace_existing=True
 )
+liq_sec = int(config.get('LIQ_INTERVAL'))
 scheduler.add_job(
     calculation.calculate_liq_prices,
-    trigger=IntervalTrigger(seconds=7),
+    trigger=IntervalTrigger(seconds=liq_sec),
     # next_run_time=datetime.now(),
     id="liqCalculator",
     replace_existing=True
 )
+limit_sec = int(config.get('LIMIT_INTERVAL'))
 scheduler.add_job(
     calculation.settle_orders,
-    trigger=IntervalTrigger(seconds=5),
+    trigger=IntervalTrigger(seconds=limit_sec),
     # next_run_time=datetime.now(),
     id="orderSettler",
     replace_existing=True
