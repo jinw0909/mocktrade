@@ -1024,7 +1024,7 @@ class CalculationService(MySQLAdapter):
                         datetime.now(timezone("Asia/Seoul")),
                         limit_tp,
                         current_id,
-                        limit_tp
+                        order.get('order_price', limit_tp)
                     ))
                     logger.info("successfully opened the take profit order from the triggered limit order")
 
@@ -1049,7 +1049,7 @@ class CalculationService(MySQLAdapter):
                         datetime.now(timezone("Asia/Seoul")),
                         limit_sl,
                         order_id,
-                        limit_sl
+                        order.get('order_price', limit_sl)
                     ))
                     logger.info("successfully opened the stop loss order from the triggered limit order")
 
@@ -1081,7 +1081,7 @@ class CalculationService(MySQLAdapter):
                    AND `symbol` = %s
             """, (user_id, symbol))
 
-            if new_position.get('status') == 'closed':
+            if new_position.get('status') == 'closed': # invalid
                 cursor.execute("""
                     UPDATE `mocktrade`.`order_history`
                        SET `status` = 4
@@ -1090,7 +1090,7 @@ class CalculationService(MySQLAdapter):
                        AND `user_id` = %s
                        AND `status` = 0
                 """, (symbol, user_id))
-            elif new_position.get('close'):  # position tp/sl
+            elif new_position.get('close'):  # position tp/sl or the only order tp/sl
                 cursor.execute("""
                     UPDATE mocktrade.position_history
                        SET `pnl` = %s,
@@ -1113,6 +1113,15 @@ class CalculationService(MySQLAdapter):
                        AND `user_id` = %s
                        AND `status` = 0
                 """, (symbol, user_id))
+
+                cursor.execute("""
+                    UPDATE `mocktrade`.`order_history`
+                       SET `status` = 1
+                     WHERE `type` IN ('tp', 'sl')
+                       AND `id` = %s
+                       AND `user_id` = %s
+                       AND `symbol` = %s                    
+                """, (order_id, user_id, symbol))
 
             else: # partial close
                 cursor.execute("""

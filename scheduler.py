@@ -164,3 +164,20 @@ def shutdown_scheduler():
         scheduler.shutdown(wait=False)
     except AttributeError:
         pass
+#
+# if __name__ == "__main__":
+#     import asyncio
+#     import logging
+#
+#     logging.basicConfig(level=logging.INFO)
+#     logger.info("Starting standalone APScheduler service...")
+#
+#     async def start():
+#         start_scheduler()
+#
+#     loop = asyncio.new_event_loop()
+#     asyncio.set_event_loop(loop)
+#     loop.run_until_complete(start())
+#     loop.run_forever()
+
+
