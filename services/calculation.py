@@ -810,7 +810,7 @@ class CalculationService(MySQLAdapter):
                 order['price'] = exec_price
                 logger.info(f"exit_price: {order['price']}")
 
-                current_position = positions.get(symbol)
+                current_position = positions.get(symbol) or {}
                 # if not current_position:
                 #     continue
 
