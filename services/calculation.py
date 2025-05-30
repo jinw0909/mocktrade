@@ -806,7 +806,7 @@ class CalculationService(MySQLAdapter):
 
                 exec_price = max(current_price, exit_price) if side == 'sell' else min(current_price, exit_price)
                 order['price'] = exec_price
-                logger.info(f"exit_price: {order['price']}")
+                # logger.info(f"exit_price: {order['price']}")
 
                 current_position = positions.get(symbol)
                 if not current_position:
@@ -1154,29 +1154,27 @@ class CalculationService(MySQLAdapter):
                 UPDATE `mocktrade`.`order_history`
                    SET `status` = 1,
                        `price` = %s,
-                       `update_time` = %s,
-                       `po_id` = %s
+                       `update_time` = %s
                  WHERE `id` = %s
             """, (
                 order.get('price', 0),
                 datetime.now(timezone('Asia/Seoul')),
-                current_id,
                 order_id
             ))
 
-            cursor.execute("""
-                UPDATE mocktrade.order_history
-                   SET status = 4
-                 WHERE `type` IN ('tp', 'sl')
-                   AND po_id = %s
-                   AND `symbol` = %s
-                   AND `user_id` = %s
-                   AND status = 0
-            """, (
-                order['po_id'],
-                symbol,
-                user_id
-            ))
+            # cursor.execute("""
+            #     UPDATE mocktrade.order_history
+            #        SET status = 4
+            #      WHERE `type` IN ('tp', 'sl')
+            #        AND po_id = %s
+            #        AND `symbol` = %s
+            #        AND `user_id` = %s
+            #        AND status = 0
+            # """, (
+            #     order['po_id'],
+            #     symbol,
+            #     user_id
+            # ))
 
             # Cancel sibling TP/SL order depending on triggered type
             if order['type'] == 'tp':
