@@ -14,7 +14,7 @@ logger = logging.getLogger('uvicorn')
 
 # decode_responses=True makes redis return str instead of bytes
 redis_client = aioredis.Redis(
-    host="localhost", port=6379, db=0, decode_responses=True
+    host=config.get('LOCAL_REDIS'), port=6379, db=0, decode_responses=True
 )
 price_redis = aioredis.Redis(
     host=config.get('REDIS_HOST'), port=6379, db=0, decode_responses=True
