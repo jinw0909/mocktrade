@@ -1081,7 +1081,7 @@ class CalculationService(MySQLAdapter):
                    AND `symbol` = %s
             """, (user_id, symbol))
 
-            if new_position.get('status') == 'closed': # invalid
+            if new_position.get('status') == 'closed':  # invalid
                 cursor.execute("""
                     UPDATE `mocktrade`.`order_history`
                        SET `status` = 4
@@ -1090,6 +1090,7 @@ class CalculationService(MySQLAdapter):
                        AND `user_id` = %s
                        AND `status` = 0
                 """, (symbol, user_id))
+
             elif new_position.get('close'):  # position tp/sl or the only order tp/sl
                 cursor.execute("""
                     UPDATE mocktrade.position_history
@@ -1116,12 +1117,14 @@ class CalculationService(MySQLAdapter):
 
                 cursor.execute("""
                     UPDATE `mocktrade`.`order_history`
-                       SET `status` = 1
+                       SET `status` = 1,
+                           `price` = %s,
+                           `update_time` = %s
                      WHERE `type` IN ('tp', 'sl')
                        AND `id` = %s
                        AND `user_id` = %s
                        AND `symbol` = %s                    
-                """, (order_id, user_id, symbol))
+                """, (order.get('price', 0), datetime.now(timezone('Asia/Seoul')), order_id, user_id, symbol))
 
             else: # partial close
                 cursor.execute("""
@@ -1159,6 +1162,20 @@ class CalculationService(MySQLAdapter):
                     0
                 ))
 
+                # mark order settled
+                cursor.execute("""
+                    UPDATE `mocktrade`.`order_history`
+                       SET `status` = 1,
+                           `price` = %s,
+                           `update_time` = %s
+                     WHERE `id` = %s
+                       AND `status` = 0
+                """, (
+                    order.get('price', 0),
+                    datetime.now(timezone('Asia/Seoul')),
+                    order_id
+                ))
+
             close_pnl = new_position.get('close_pnl', 0)
             logger.info(f"applying close PnL of {close_pnl} to user [{user_id}]'s wallet")
             if close_pnl:
@@ -1168,20 +1185,6 @@ class CalculationService(MySQLAdapter):
                      WHERE `id` = %s
                        AND `status` = 0  
                 """, (close_pnl, user_id))
-
-            # mark order settled
-            cursor.execute("""
-                UPDATE `mocktrade`.`order_history`
-                   SET `status` = 1,
-                       `price` = %s,
-                       `update_time` = %s
-                 WHERE `id` = %s
-                   AND `status` = 0
-            """, (
-                order.get('price', 0),
-                datetime.now(timezone('Asia/Seoul')),
-                order_id
-            ))
 
             # Cancel sibling TP/SL order depending on triggered type
             if order['type'] == 'tp':
