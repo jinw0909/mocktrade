@@ -7,8 +7,8 @@ from utils.trei import MySQLAdapter,MakeErrorType
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Optional
 from models import OrderModel
+from utils.local_redis import update_position_status_per_user, update_order_status_per_user, update_balance_status_per_user
 router= APIRouter()
-
 
 
 # @router.get('/btc-signal', summary='SIGNAL', tags=['SIGNAL API'])
@@ -52,6 +52,7 @@ async def api_select(user_no: str, symbol: str, margin_type: int, leverage: int,
             user_id=data['id'].iloc[0]
             mysql.buy_limit_order(user_id,symbol,margin_type,leverage,price,usdt,amount,tp,sl)
             mysql.insert_trade_log(user_id, symbol, 'limit', margin_type, 'buy', price, usdt, amount, leverage, tp,sl,mysql.return_dict_data['reCode'],mysql.return_dict_data['message'])    
+
         else:
             
             mysql.return_dict_data['reCode']=105
