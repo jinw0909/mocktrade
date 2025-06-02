@@ -55,7 +55,7 @@ async def api_select(user_no: str, symbol: str, margin_type: int, leverage: int,
 
             await update_position_status_per_user(user_id, user_no)
             await update_order_status_per_user(user_id, user_no)
-            await update_balance_status_per_user(user_id)
+            await update_balance_status_per_user(user_id, user_no)
 
         else:
             
@@ -95,7 +95,7 @@ async def api_select(user_no: str, symbol: str, margin_type: int, leverage: int,
 
             await update_position_status_per_user(user_id, user_no)
             await update_order_status_per_user(user_id, user_no)
-            await update_balance_status_per_user(user_id)
+            await update_balance_status_per_user(user_id, user_no)
 
         else:
             
@@ -131,7 +131,7 @@ async def api_select(user_no: str, symbol: str, margin_type: int, leverage: int,
 
             await update_position_status_per_user(user_id, user_no)
             await update_order_status_per_user(user_id, user_no)
-            await update_balance_status_per_user(user_id)
+            await update_balance_status_per_user(user_id, user_no)
 
         else:
             
@@ -168,7 +168,7 @@ async def api_select(user_no: str, symbol: str, margin_type: int, leverage: int,
 
             await update_position_status_per_user(user_id, user_no)
             await update_order_status_per_user(user_id, user_no)
-            await update_balance_status_per_user(user_id)
+            await update_balance_status_per_user(user_id, user_no)
 
         else:
             
@@ -273,7 +273,7 @@ async def api_select(user_no: str,position_id:int):
 
             await update_position_status_per_user(user_id, user_no)
             await update_order_status_per_user(user_id, user_no)
-            await update_balance_status_per_user(user_id)
+            await update_balance_status_per_user(user_id, user_no)
         else:
             
             mysql.return_dict_data['reCode']=105
@@ -310,7 +310,7 @@ async def api_select(user_no: str):
 
             await update_position_status_per_user(user_id, user_no)
             await update_order_status_per_user(user_id, user_no)
-            await update_balance_status_per_user(user_id)
+            await update_balance_status_per_user(user_id, user_no)
         else:
             
             mysql.return_dict_data['reCode']=105
