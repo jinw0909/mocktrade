@@ -429,7 +429,7 @@ async def update_balance_status_per_user(user_id, retri_id = None):
             if not row:
                 logger.exception(f"there is no user with a retri_id of {retri_id}")
                 return
-            user_id = row['user_id']
+            user_id = row['id']
 
         cursor.execute("""
             SELECT retri_id, balance

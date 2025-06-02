@@ -74,7 +74,7 @@ class MySQLAdapter:
             # print(config.get('HOST'))
             # print(config.get('PASS'))
             # print(config.get('DBNAME'))
-            connection = rd = redis.Redis(host='172.31.11.200', port=6379, db=0)
+            connection = rd = redis.Redis(host=config.get('REDIS_HOST'), port=6379, db=0)
            
             
         except Exception as e:
@@ -831,7 +831,7 @@ class MySQLAdapter:
         rd = self._get_redis()
         price_ch,qty_ch=self.get_qty(symbol)
         new_price = rd.get(f'price:{symbol}USDT')
-                
+        print(f"new_price: {new_price}")
         if new_price:  # price 값이 None이 아닌 경우에만 진행
             new_price1 = float(new_price.decode())  # 바이트 문자열을 디코딩하여 float로 변환'
             
