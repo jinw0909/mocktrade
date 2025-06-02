@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from utils.frontapi import MySQLAdapter,MakeErrorType
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Optional
-from utils.local_redis import update_position_status_per_user, update_order_status_per_user, update_balance_status_per_user
+from utils.local_redis import update_balance_status_per_user
 router= APIRouter()
 
 
