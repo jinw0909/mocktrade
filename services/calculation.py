@@ -732,16 +732,16 @@ class CalculationService(MySQLAdapter):
 
                 # Persist to MySQL
                 current_id = current_position.get('pos_id', 0)
-                await self.persist_executed_limit_order(order, new_position, current_id)
-
+                updated_id = await self.persist_executed_limit_order(order, new_position, current_id)
                 # Prepare WebSocket trigger
                 # retri_id = order.get('retri_id') or user_id  # or from user db if needed
-                pending_notifs.append((user_id, {"trigger": "limit", "order": order}))
-                updated_users[uid] = user_id
+                if (updated_id):
+                    pending_notifs.append((user_id, {"trigger": "limit", "order": order}))
+                    updated_users[uid] = user_id
 
-                row_count += 1
+                    row_count += 1
 
-                break  # Settle only one order per user
+                    break  # Settle only one order per user
 
         # Notify users
         for retri_id, message in pending_notifs:
@@ -817,15 +817,15 @@ class CalculationService(MySQLAdapter):
                 new_position = calculate_new_position(current_position, order)
 
                 current_id = current_position.get("pos_id")
-                await self.persist_triggered_tpsl_order(order, new_position, current_id)
+                updated_id = await self.persist_triggered_tpsl_order(order, new_position, current_id)
+                if updated_id:
+                    uid = order.get('user_id')
+                    pending_notifs.append((user_id, {"trigger": "tp/sl", "order": order}))
+                    updated_users[uid] = user_id
 
-                uid = order.get('user_id')
-                pending_notifs.append((user_id, {"trigger": "tp/sl", "order": order}))
-                updated_users[uid] = user_id
+                    row_count += 1
 
-                row_count += 1
-
-                break
+                    break
 
         for retri_id, message in pending_notifs:
             await manager.notify_user(retri_id, message)
@@ -846,6 +846,15 @@ class CalculationService(MySQLAdapter):
             user_id = order.get('user_id')
             symbol = order.get('symbol')
             order_id = order.get('or_id')
+
+            cursor.execute("""
+                SELECT `status` FROM `mocktrade`.`order_history`
+                WHERE `id` = %s
+            """, (order_id, ))
+            order_row = cursor.fetchone()
+            if not order_row or order_row['status'] != 0:
+                logger.warning(f"this limit order ({order_id}) has already been executed or doesn't exist. Check if the Redis synchronization is functioning properly.")
+                return
 
             cursor.execute("""
                 UPDATE mocktrade.position_history SET `status` = 2
@@ -1074,6 +1083,15 @@ class CalculationService(MySQLAdapter):
             order_id = order.get('or_id')
 
             cursor.execute("""
+                SELECT `status` FROM `mocktrade`.`order_history`
+                WHERE `id` = %s
+            """, (order_id, ))
+            order_row = cursor.fetchone()
+            if not order_row or order_row['status'] != 0:
+                logger.warning(f"this tp/sl order ({order_id}) has already executed or doesn't exist. Check if the Redis sync is properly functioning")
+                return
+
+            cursor.execute("""
                 UPDATE `mocktrade`.`position_history`
                    SET `status` = 2
                  WHERE `status` = 1
@@ -1217,6 +1235,7 @@ class CalculationService(MySQLAdapter):
                 ))
 
             conn.commit()
+            return user_id
         except Exception:
             logger.exception(f"failed to persist tp/sl execution of order [{order.get('or_id')}]")
             conn.rollback()
