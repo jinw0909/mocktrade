@@ -3,26 +3,18 @@ import asyncio
 import asyncio
 import json
 import logging
-import time
 
-from datetime import datetime, timedelta
-from pytz import timezone
 from starlette.config import Config
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from utils.connection_manager import manager
 import redis.asyncio as aioredis
-from utils.connections import MySQLAdapter
 
 router = APIRouter()
 logger = logging.getLogger("pnl_ws")
 config = Config('.env')
 
 from utils.connections import MySQLAdapter
-from utils.connection_manager import manager
-import traceback
 from datetime import datetime, timedelta
 from pytz import timezone
-import logging
 from utils.symbols import symbols as SYMBOL_CFG
 from utils.connection_manager import manager
 from utils.local_redis import update_position_status_per_user, update_order_status_per_user, update_balance_status_per_user
@@ -382,7 +374,7 @@ def calculate_new_position(current_position, order):
     }
 
 
-class CalculationService(MySQLAdapter):
+class RealtimeService(MySQLAdapter):
 
     def __init__(self):
         super().__init__()
@@ -621,9 +613,9 @@ class CalculationService(MySQLAdapter):
 
                         # 5. send socket message to inform liquidation
                         await manager.notify_user(
-                                user_id,
-                                { "trigger" : "liquidation_cross", "pos": to_liquidate }
-                            )
+                            user_id,
+                            { "trigger" : "liquidation_cross", "pos": to_liquidate }
+                        )
 
 
                     except Exception:
@@ -646,22 +638,6 @@ class CalculationService(MySQLAdapter):
             except Exception:
                 logger.exception(f"Failed calculating liq prices for user")
                 continue
-
-    async def pnl_loop(self):
-        while True:
-            try:
-                await self.calculate_pnl()
-            except Exception:
-                logger.exception("Failed during calculate_pnl")
-            await asyncio.sleep(2.0)  # every 2 seconds
-
-    async def liq_loop(self):
-        while True:
-            try:
-                await self.calculate_liq_prices()
-            except Exception:
-                logger.exception("Failed during calculate_liq_prices")
-            await asyncio.sleep(7.0)  # every 7 seconds
 
     async def settle_orders(self):
         logger.info(f"executing settle orders at {datetime.now(timezone('Asia/Seoul'))}")
@@ -719,7 +695,7 @@ class CalculationService(MySQLAdapter):
 
 
                 # Execute the order
-                logger.info(f"executing order [{order.get('or_id')}]")
+                logger.info(f"Triggering limit order [{order.get('or_id')}] for user {uid} on {symbol} at price {current_price}")
                 exec_price = current_price
 
                 # Update order in memory
@@ -732,7 +708,7 @@ class CalculationService(MySQLAdapter):
 
                 # Persist to MySQL
                 current_id = current_position.get('pos_id', 0)
-                updated_id = await self.persist_executed_limit_order(order, new_position, current_id)
+                updated_id = await self.persist_executed_limit_order(order, new_position, current_id, position_redis, retri_id=user_id)
                 # Prepare WebSocket trigger
                 # retri_id = order.get('retri_id') or user_id  # or from user db if needed
                 if (updated_id):
@@ -742,6 +718,7 @@ class CalculationService(MySQLAdapter):
                     row_count += 1
 
                     break  # Settle only one order per user
+
 
         # Notify users
         for retri_id, message in pending_notifs:
@@ -799,8 +776,8 @@ class CalculationService(MySQLAdapter):
 
                 # check if it should trigger
                 should_settle = (
-                    (order_type == 'tp' and ((side == 'sell' and current_price >= exit_price) or (side == 'buy' and current_price <= exit_price))) or
-                    (order_type == 'sl' and ((side == 'sell' and current_price <= exit_price) or (side == 'buy' and current_price >= exit_price)))
+                        (order_type == 'tp' and ((side == 'sell' and current_price >= exit_price) or (side == 'buy' and current_price <= exit_price))) or
+                        (order_type == 'sl' and ((side == 'sell' and current_price <= exit_price) or (side == 'buy' and current_price >= exit_price)))
                 )
                 if not should_settle:
                     continue
@@ -834,12 +811,21 @@ class CalculationService(MySQLAdapter):
             await update_order_status_per_user(user_id, retri_id)
             await update_balance_status_per_user(user_id, retri_id)
 
-    async def persist_executed_limit_order(self, order, new_position, current_id):
+    async def persist_executed_limit_order(self, order, new_position, current_id, position_redis, retri_id):
+        """
+        Persist the executed limit order into MySQL, then update Redis:
+        - Remove the filled limit from orders:<user_id>
+        - Update/delete positions:<user_id>.[symbol]
+        - Adjust balances:<user_id>
+        - Insert/delete TP?SL orders in orders:<user_id>
+        """
+
         logger.info(f"persisting limit order [{order.get('or_id')}]")
         conn = None
         cursor = None
 
         try:
+            # 1) BEGIN MySQL transaction
             conn = self._get_connection()
             cursor = conn.cursor()
 
@@ -847,6 +833,7 @@ class CalculationService(MySQLAdapter):
             symbol = order.get('symbol')
             order_id = order.get('or_id')
 
+            # 1.1) Guard: ensure the limit order is still open (status = 0)
             cursor.execute("""
                 SELECT `status` FROM `mocktrade`.`order_history`
                 WHERE `id` = %s
@@ -856,12 +843,18 @@ class CalculationService(MySQLAdapter):
                 logger.warning(f"this limit order ({order_id}) has already been executed or doesn't exist. Check if the Redis synchronization is functioning properly.")
                 return
 
+            # 1.2) Mark any open position on this symbol as "closing" (status = 2)
             cursor.execute("""
                 UPDATE mocktrade.position_history SET `status` = 2
                 WHERE `status` = 1 AND `user_id` = %s AND `symbol` = %s
             """, (user_id, symbol))
 
-            if new_position.get('close'):  # full close
+            created_tpsl = [] # collect any new TP/SL orders for Redis later
+
+            # 1.3) Handle the four possible new_position cases:
+
+            if new_position.get('close'):
+                # FULL CLOSE
                 cursor.execute("""
                     UPDATE `mocktrade`.`position_history`
                        SET `status` = 3,
@@ -876,7 +869,7 @@ class CalculationService(MySQLAdapter):
                     current_id
                 ))
 
-                # close existing tp/sl orders
+                # Close any attached TP/SL in MySQL
                 cursor.execute("""
                     UPDATE mocktrade.order_history
                        SET status = 4
@@ -886,7 +879,12 @@ class CalculationService(MySQLAdapter):
                        AND type IN ('tp', 'sl')
                 """, (symbol, user_id))
 
+                # ● Redis logic for full close will come after committing MySQL
+
             elif new_position.get('flip'):
+                # FLIP (close old, open new position)
+
+                # 1) Close the old position
                 cursor.execute("""
                     UPDATE `mocktrade`.`position_history`
                        SET `status` = 3,
@@ -900,6 +898,8 @@ class CalculationService(MySQLAdapter):
                     new_position.get('close_price', 0),
                     current_id
                 ))
+
+                # 2) Insert the new flipped position as a brand-new row
                 cursor.execute("""
                     INSERT INTO `mocktrade`.`position_history` (
                         user_id, symbol, size, amount, 
@@ -918,7 +918,7 @@ class CalculationService(MySQLAdapter):
                     new_position.get('close_price')
                 ))
 
-                # close existing tp/sl orders
+                # Close any attached TP/SL in MySQL
                 cursor.execute("""
                     UPDATE mocktrade.order_history
                        SET status = 4
@@ -928,7 +928,12 @@ class CalculationService(MySQLAdapter):
                        AND type IN ('tp', 'sl')
                 """, (symbol, user_id))
 
+                # ● Redis logic for flip will come after committing MySQL
+
             elif new_position.get('partial'):
+                # PARTIAL CLOSE
+
+                # 1) Update the existing position row's PnL and close_price
                 cursor.execute("""
                     UPDATE mocktrade.position_history
                     SET `pnl` = %s,
@@ -942,6 +947,7 @@ class CalculationService(MySQLAdapter):
                     current_id
                 ))
 
+                # 2) Insert a new row for the remaining (partial) position
                 insert_sql = """
                   INSERT INTO mocktrade.position_history
                    (user_id, symbol, size, amount, entry_price,
@@ -960,7 +966,10 @@ class CalculationService(MySQLAdapter):
                     0
                 ))
 
-            else:  # same side or new position
+                # ● Redis logic for partial will come after committing MySQL
+
+            else:
+                # SAME SIDE or NEW POSITION
                 insert_sql = """
                   INSERT INTO mocktrade.position_history
                    (user_id, symbol, size, amount, entry_price,
@@ -979,7 +988,9 @@ class CalculationService(MySQLAdapter):
                     new_position.get('close_price')
                 ))
 
-            # update wallet for any realized PnL
+                # ● Redis logic for same side / new position will come after committing MySQL
+
+            # 1.4) Update MySQL user balance if there was realized PnL
             close_pnl = new_position.get('close_pnl', 0)
             if close_pnl:
                 cursor.execute("""
@@ -988,7 +999,7 @@ class CalculationService(MySQLAdapter):
                      WHERE `id` = %s
                 """, (close_pnl, user_id))
 
-            # mark order settled
+            # 1.5) Mark the limit order as executed (status = 1) in MySQL
             cursor.execute("""
                 UPDATE mocktrade.order_history
                    SET `status` = 1,
@@ -998,7 +1009,7 @@ class CalculationService(MySQLAdapter):
                  WHERE `id` = %s
             """, (current_id, order['price'], datetime.now(timezone('Asia/Seoul')), order_id))
 
-            # 7) If tp/sl was attached
+            # 1.6) Create any TP/SL orders in MySQL
             if (order["tp"] or order["sl"]) and new_position['amount'] > 0:
                 logger.info("opening tp/sl orders from the triggered limit order")
                 symbol = order['symbol']
@@ -1009,6 +1020,9 @@ class CalculationService(MySQLAdapter):
                 leverage = order['leverage']
                 margin_type = order['margin_type']
                 margin = order['margin']
+
+                # In a flip/full-close scenario, all existing TP/SL for this symbol are already closed above
+                # For a partial/same-side or new position, we now insert new TP/SL if needed.
 
                 order_side = 'sell' if limit_side == 'buy' else 'buy'
 
@@ -1035,6 +1049,25 @@ class CalculationService(MySQLAdapter):
                         current_id,
                         order.get('order_price', limit_tp)
                     ))
+                    created_tpsl.append(
+                        {
+                            "or_id": cursor.lastrowid,
+                            "user_id": user_id,
+                            "symbol": symbol,
+                            "price": None,
+                            "type": "tp",
+                            "margin_type": margin_type,
+                            "margin": margin,
+                            "leverage": leverage,
+                            "side": order_side,
+                            "amount": limit_amount,
+                            "tp": limit_tp,
+                            "sl": None,
+                            "po_id": current_id,
+                            "order_price": order.get("order_price", limit_tp),
+                            "status": 0,
+                        }
+                    )
                     logger.info("successfully opened the take profit order from the triggered limit order")
 
                 if limit_sl:
@@ -1060,10 +1093,121 @@ class CalculationService(MySQLAdapter):
                         order_id,
                         order.get('order_price', limit_sl)
                     ))
+                    created_tpsl.append(
+                        {
+                            "or_id": cursor.lastrowid,
+                            "user_id": user_id,
+                            "symbol": symbol,
+                            "price": None,
+                            "type": "sl",
+                            "margin_type": margin_type,
+                            "margin": margin,
+                            "leverage": leverage,
+                            "side": order_side,
+                            "amount": limit_amount,
+                            "tp": None,
+                            "sl": limit_sl,
+                            "po_id": order_id,
+                            "order_price": order.get("order_price", limit_sl),
+                            "status": 0,
+                        }
+                    )
                     logger.info("successfully opened the stop loss order from the triggered limit order")
 
+                # if tp or sl was attached to this triggered limit order, then those orders should be added to the Redis 'orders' table
+                # if it was a full close, the new_position['amount'] > 0 condition will be false, so this update logic will not execute which pretty much intend00ed
+            # 2) COMMIT MySQL
             conn.commit()
+
+            # 3) NOW MIRROR ALL THOSE CHANGES IN REDIS
+
+            # 3.1) Remove the executed limit order from orders:<user_id>
+            orders_key = f"orders:{retri_id}"
+            raw_redis_orders = await position_redis.get(orders_key) or "[]"
+            try:
+                redis_orders = json.loads(raw_redis_orders)
+            except Exception:
+                redis_orders = []
+            # Filter out the triggered limit order
+            redis_orders = [
+                o for o in redis_orders if o.get("or_id") != order_id
+            ]
+
+            # 3.2) If the new TP/SL order were created, append them now
+            for new_tpsl in created_tpsl:
+                redis_orders.append(new_tpsl)
+
+            # Write back the updated array
+            await position_redis.set(orders_key, json.dumps(redis_orders))
+
+            # 3.3) Update positions:<user_id> depending on new_position
+            pos_key = f"positions:{retri_id}"
+
+            if new_position.get("close"):
+                # Full close -> remove the field for this symbol
+                await position_redis.hdel(pos_key, symbol)
+
+                # Also remove any leftover TP/SL orders for this symbol from orders array
+                raw_redis_orders = await position_redis.get(orders_key) or "[]"
+                try:
+                    still_orders = json.loads(raw_redis_orders)
+                except Exception:
+                    still_orders = []
+
+                # Drop any orders for this symbol (type 'tp' or 'sl')
+                still_orders = [
+                    o for o in still_orders
+                    if not (o.get("symbol") == symbol and o.get("type") in ("tp", "sl"))
+                ]
+                await position_redis.set(orders_key, json.dumps(still_orders))
+
+            elif new_position.get("flip"):
+                # Flip -> overwrite the field for this symbol with new_position
+                await position_redis.hset(
+                    pos_key, symbol, json.dumps(new_position)
+                )
+
+                # Remove any leftover TP/SL orders for this symbol (they were closed above in MySQL)
+                raw_redis_orders = await position_redis.get(orders_key) or "[]"
+                try:
+                    still_orders = json.loads(raw_redis_orders)
+                except Exception:
+                    still_orders = []
+
+                still_orders = [
+                    o for o in still_orders
+                    if not (o.get("symbol") and o.get("type") in ("tp", "sl"))
+                ]
+                await position_redis.set(orders_key, json.dumps(still_orders))
+
+            elif new_position.get("partial"):
+                # Partial -> update the existing JSON for this symbol
+                await position_redis.hset(
+                    pos_key, symbol, json.dumps(new_position)
+                )
+            else:
+                # Same side / New -> either overwrite or insert the field
+                await position_redis.hset(
+                    pos_key, symbol, json.dumps(new_position)
+                )
+
+            # 3.4) Update balances:<user_id> if any realized PnL
+            if close_pnl:
+                balance_key = f"balances:{retri_id}"
+                raw_balance = await position_redis.get(balance_key) or "0"
+                try:
+                    old_balance = float(raw_balance)
+                except Exception:
+                    old_balance = 0.0
+
+                new_balance = old_balance + close_pnl
+                if new_balance < 0:
+                    new_balance = 0.0
+                await position_redis.set(balance_key, str(new_balance))
+
+            # 4) DONE
             return user_id
+
         except Exception:
             logger.exception(f"failed to persist limit order execution of order [{order.get('or_id')}] to MySQL")
             conn and conn.rollback()
@@ -1082,8 +1226,7 @@ class CalculationService(MySQLAdapter):
             user_id = order.get('user_id')
             symbol = order.get('symbol')
             order_id = order.get('or_id')
-            
-            # safeguard on not to execute the same order multiple times
+
             cursor.execute("""
                 SELECT `status` FROM `mocktrade`.`order_history`
                 WHERE `id` = %s
