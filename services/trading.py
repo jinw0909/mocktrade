@@ -1689,3 +1689,34 @@ class TradingService(MySQLAdapter):
                 cursor.close()
             if conn:
                 conn.close()
+
+    async def clean_up(self):
+        conn = None
+        cursor = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                DELETE FROM `mocktrade`.`position_history`
+                WHERE `datetime` > %s
+                AND `status` <> 1
+            """, (
+                datetime.now(timezone('Asia/Seoul'))
+            ))
+
+            cursor.execute("""
+                DELETE FROM `mocktrade`.`order_history`
+                WHERE `insert_time` > %s
+                AND `status` <> 0
+            """, (
+                datetime.now(timezone('Asia/Seoul'))
+            ))
+
+        except Exception:
+            logger.exception("failed to clean up db")
+            conn and conn.close()
+        finally:
+            cursor and cursor.close()
+            conn and conn.close()
+

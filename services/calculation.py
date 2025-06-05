@@ -1253,11 +1253,11 @@ class CalculationService(MySQLAdapter):
 
         pending_notifs: list[tuple[str, dict]] = []
         liquidated_users = {}
-
-        position_redis = await self.get_position_redis()
-        if not position_redis:
-            logger.warning("position redis yet to be initialized")
-            return
+        #
+        # position_redis = await self.get_position_redis()
+        # if not position_redis:
+        #     logger.warning("position redis yet to be initialized")
+        #     return
 
         try:
             conn = self._get_connection()

@@ -15,6 +15,7 @@ from utils.local_redis import (update_position_status_to_redis,
                                update_order_status_to_redis,
                                update_liq_price)
 from services.calculation import CalculationService
+from services.realtime import RealtimeService
 from starlette.config import Config
 
 config = Config(".env")
@@ -30,10 +31,10 @@ SYMBOL_TO_COINGECKO_ID = {
     "ETH": "ethereum",
     "XRP": "ripple",
 }
-
-mysql = MySQLAdapter()
+# mysql = MySQLAdapter()
 trader = TradingService()
 calculation = CalculationService()
+realtime = RealtimeService()
 
 async def calculate_cross():
     try:
@@ -66,7 +67,6 @@ async def calculate_upnl():
     except Exception:
         # traceback.print_exc()
         logger.exception("Failed to update prices:")
-
 
 
 async def liquidate_positions():
@@ -113,7 +113,6 @@ async def update_status_to_redis():
     except Exception:
         logger.exception("Failed to update MySQL status to Redis")
 
-
 # ————————————————
 # scheduler wiring
 # ————————————————
@@ -145,6 +144,7 @@ scheduler.add_job(
 )
 limit_sec = int(config.get('LIMIT_INTERVAL'))
 scheduler.add_job(
+    # calculation.settle_orders,
     calculation.settle_orders,
     trigger=IntervalTrigger(seconds=limit_sec),
     # next_run_time=datetime.now(),

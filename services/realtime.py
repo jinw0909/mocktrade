@@ -508,11 +508,11 @@ class RealtimeService(MySQLAdapter):
                 cross = [p for p in positions if p["margin_type"] == "cross"]
 
                 other_maint = {
-                    p["pos_id"]: sum(MAINTENANCE_RATE * q["size"] for q in cross if q["pos_id"] != p["pos_id"])
+                    p["symbol"]: sum(MAINTENANCE_RATE * q["size"] for q in cross if q["symbol"] != p["symbol"])
                     for p in cross
                 }
                 other_upnl = {
-                    p["pos_id"]: sum(q.get("unrealized_pnl", 0.0) for q in cross if q["pos_id"] != p["pos_id"])
+                    p["symbol"]: sum(q.get("unrealized_pnl", 0.0) for q in cross if q["symbol"] != p["symbol"])
                     for p in cross
                 }
 
@@ -520,14 +520,14 @@ class RealtimeService(MySQLAdapter):
                 breaches = []
 
                 for p in cross:
-                    pid, entry, amt, side = p["pos_id"], p["entry_price"], p["amount"], p["side"]
+                    sym, entry, amt, side = p["symbol"], p["entry_price"], p["amount"], p["side"]
                     market_price = p.get("market_price")
                     if market_price is None:
-                        raw = await price_redis.get(f"price:{p['symbol']}USDT")
+                        raw = await price_redis.get(f"price:{sym}USDT")
                         market_price = float(raw) if raw else entry
 
                     my_maint = MAINTENANCE_RATE * market_price * amt
-                    eq_me = cross_equity - other_maint[pid] + other_upnl[pid]
+                    eq_me = cross_equity - other_maint[sym] + other_upnl[sym]
                     target_pnl = my_maint - eq_me
 
                     if side == "buy":
@@ -540,19 +540,18 @@ class RealtimeService(MySQLAdapter):
                     curr = float(raw) if raw else None
 
                     liq_prices.append({
-                        "pos_id": pid,
-                        "symbol": p["symbol"],
+                        "symbol": sym,
                         "liq_price": lp
                     })
 
                     if curr is not None:
                         if (side == "buy" and curr <= lp) or (side == "sell" and curr >= lp):
                             breaches.append({
-                                "pos_id": pid,
-                                "symbol": p["symbol"],
+                                "symbol": sym,
                                 "liq_price": lp,
                                 "current": curr,
-                                "pnl": p.get("unrealized_pnl", 0.0)
+                                "pnl": p.get("unrealized_pnl", 0.0),
+                                "uid": p.get("user_id")
                             })
 
                 to_liquidate = min(breaches, key=lambda b: b["pnl"]) if breaches else None
@@ -575,17 +574,17 @@ class RealtimeService(MySQLAdapter):
                              WHERE retri_id = %s
                         """, (pnl_liq, user_id))
 
-                        # 2. Get user ID from retri_id
-                        cursor.execute("""
-                            SELECT `id` FROM mocktrade.user
-                             WHERE retri_id = %s AND status = 0
-                        """, (user_id,))
-                        row = cursor.fetchone()
-                        if not row:
-                            logger.warning(f"User not found with retri_id={user_id}")
-                            continue
+                        # # 2. Get user ID from retri_id
+                        # cursor.execute("""
+                        #     SELECT `id` FROM mocktrade.user
+                        #      WHERE retri_id = %s AND status = 0
+                        # """, (user_id,))
+                        # row = cursor.fetchone()
+                        # if not row:
+                        #     logger.warning(f"User not found with retri_id={user_id}")
+                        #     continue
 
-                        uid = row['id']
+                        uid = to_liquidate['uid']
 
                         # 3. Mark the latest active position as liquidated
                         cursor.execute("""
@@ -723,10 +722,10 @@ class RealtimeService(MySQLAdapter):
         # Notify users
         for retri_id, message in pending_notifs:
             await manager.notify_user(retri_id, message)
-        for user_id, retri_id in updated_users.items():
-            await update_position_status_per_user(user_id, retri_id)
-            await update_order_status_per_user(user_id, retri_id)
-            await update_balance_status_per_user(user_id, retri_id)
+        # for user_id, retri_id in updated_users.items():
+        #     await update_position_status_per_user(user_id, retri_id)
+        #     await update_order_status_per_user(user_id, retri_id)
+        #     await update_balance_status_per_user(user_id, retri_id)
 
         return row_count
 
@@ -1396,11 +1395,6 @@ class RealtimeService(MySQLAdapter):
 
         pending_notifs: list[tuple[str, dict]] = []
         liquidated_users = {}
-
-        position_redis = await self.get_position_redis()
-        if not position_redis:
-            logger.warning("position redis yet to be initialized")
-            return
 
         try:
             conn = self._get_connection()
