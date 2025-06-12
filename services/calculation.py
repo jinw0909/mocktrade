@@ -480,6 +480,7 @@ class CalculationService(MySQLAdapter):
 
     async def calculate_liq_prices(self):
         # logger.info("Starting global liquidation price calculation")
+
         position_redis = await self.get_position_redis()
         price_redis = await self.get_price_redis()
 
@@ -515,37 +516,97 @@ class CalculationService(MySQLAdapter):
 
                 cross = [p for p in positions if p["margin_type"] == "cross"]
 
-                other_maint = {
-                    p["pos_id"]: sum(MAINTENANCE_RATE * q["size"] for q in cross if q["pos_id"] != p["pos_id"])
+                # 1) ensure each leg has a market_price
+                for p in cross:
+                    mp = p.get("market_price")
+                    if mp is None:
+                        raw = await price_redis.get(f"price:{p['symbol']}USDT")
+                        mp = float(raw) if raw else p["entry_price"]
+                    p["market_price"] = mp
+
+                # 2) precompute other‐legs TMM & UPNL
+                other_tmm = {
+                    p["pos_id"]: sum(
+                        MAINTENANCE_RATE * q["market_price"] * q["amount"]
+                        for q in cross
+                        if q["pos_id"] != p["pos_id"]
+                    )
                     for p in cross
                 }
                 other_upnl = {
-                    p["pos_id"]: sum(q.get("unrealized_pnl", 0.0) for q in cross if q["pos_id"] != p["pos_id"])
+                    p["pos_id"]: sum(
+                        q.get("unrealized_pnl", 0.0)
+                        for q in cross
+                        if q["pos_id"] != p["pos_id"]
+                    )
                     for p in cross
                 }
 
                 liq_prices = []
-                breaches = []
+                breaches   = []
+
+                # other_maint = {
+                #     p["pos_id"]: sum(MAINTENANCE_RATE * q["size"] for q in cross if q["pos_id"] != p["pos_id"])
+                #     for p in cross
+                # }
+                # other_upnl = {
+                #     p["pos_id"]: sum(q.get("unrealized_pnl", 0.0) for q in cross if q["pos_id"] != p["pos_id"])
+                #     for p in cross
+                # }
+                #
+                # liq_prices = []
+                # breaches = []
 
                 for p in cross:
-                    pid, entry, amt, side = p["pos_id"], p["entry_price"], p["amount"], p["side"]
-                    market_price = p.get("market_price")
-                    if market_price is None:
-                        raw = await price_redis.get(f"price:{p['symbol']}USDT")
-                        market_price = float(raw) if raw else entry
+                    # pid, entry, amt, side = p["pos_id"], p["entry_price"], p["amount"], p["side"]
+                    # market_price = p.get("market_price")
+                    # if market_price is None:
+                    #     raw = await price_redis.get(f"price:{p['symbol']}USDT")
+                    #     market_price = float(raw) if raw else entry
+                    #
+                    # my_maint = MAINTENANCE_RATE * market_price * amt
+                    # eq_me = cross_equity - other_maint[pid] + other_upnl[pid]
+                    # target_pnl = my_maint - eq_me
+                    #
+                    # if side == "buy":
+                    #     lp = max(entry + target_pnl / amt, 0.0)
+                    # else:
+                    #     lp = max(entry - target_pnl / amt, 0.0)
+                    #
+                    #
+                    # # Fetch current price for breach detection
+                    # raw = await price_redis.get(f"price:{p['symbol']}USDT")
+                    # curr = float(raw) if raw else None
+                    #
+                    # liq_prices.append({
+                    #     "pos_id": pid,
+                    #     "symbol": p["symbol"],
+                    #     "liq_price": lp
+                    # })
+                    pid    = p["pos_id"]
+                    E      = p["entry_price"]
+                    S      = p["amount"]
+                    MP     = p["market_price"]
+                    side   = 1 if p["side"] == "buy" else -1
 
-                    my_maint = MAINTENANCE_RATE * market_price * amt
-                    eq_me = cross_equity - other_maint[pid] + other_upnl[pid]
-                    target_pnl = my_maint - eq_me
+                    # maintenance amount of THIS leg at mark
+                    cumB   = MAINTENANCE_RATE * E * S
+                    # notional of THIS leg (signed)
+                    notional = side * S * E
 
-                    if side == "buy":
-                        lp = max(entry + target_pnl / amt, 0.0)
-                    else:
-                        lp = max(entry - target_pnl / amt, 0.0)
+                    # numerator & denominator of Binance’s multi‐leg formula
+                    num = (
+                            cross_equity
+                            - other_tmm[pid]
+                            + other_upnl[pid]
+                            + cumB
+                            - notional
+                    )
+                    den = S * MAINTENANCE_RATE - side * S
 
-                    # Fetch current price for breach detection
-                    raw = await price_redis.get(f"price:{p['symbol']}USDT")
-                    curr = float(raw) if raw else None
+                    # final liquidation price
+                    lp = num / den if den != 0 else 0.0
+                    lp = max(lp, 0.0)
 
                     liq_prices.append({
                         "pos_id": pid,
@@ -553,13 +614,13 @@ class CalculationService(MySQLAdapter):
                         "liq_price": lp
                     })
 
-                    if curr is not None:
-                        if (side == "buy" and curr <= lp) or (side == "sell" and curr >= lp):
+                    if MP is not None:
+                        if (side == 1 and MP <= lp) or (side == -1 and MP >= lp):
                             breaches.append({
                                 "pos_id": pid,
                                 "symbol": p["symbol"],
                                 "liq_price": lp,
-                                "current": curr,
+                                "current": MP,
                                 "pnl": p.get("unrealized_pnl", 0.0)
                             })
 
@@ -600,7 +661,8 @@ class CalculationService(MySQLAdapter):
                             UPDATE mocktrade.position_history
                                SET status = 3,
                                    pnl = %s,
-                                   datetime = %s
+                                   datetime = %s,
+                                   close_price = %s
                              WHERE symbol = %s
                                AND user_id = %s
                                AND status = 1
@@ -609,6 +671,7 @@ class CalculationService(MySQLAdapter):
                         """, (
                             pnl_liq,
                             datetime.now(timezone("Asia/Seoul")),
+                            to_liquidate["current"],
                             to_liquidate["symbol"],
                             uid
                         ))
@@ -618,6 +681,11 @@ class CalculationService(MySQLAdapter):
                         # 4. Delete liquidated Redis position
                         await position_redis.hdel(pos_key, to_liquidate["symbol"])
                         await position_redis.set(bal_key, new_balance)
+
+                        liq_prices = [
+                            p for p in liq_prices
+                            if p["pos_id"] != to_liquidate["pos_id"]
+                        ]
 
                         # 5. send socket message to inform liquidation
                         await manager.notify_user(
@@ -636,12 +704,18 @@ class CalculationService(MySQLAdapter):
                             conn.close()
 
 
-                # Store all results in a single JSON blob
-                await position_redis.set(liq_key, json.dumps({
-                    "available": available,
-                    "positions": liq_prices,
-                    "to_liquidate": to_liquidate
-                }))
+                # # Store all results in a single JSON blob
+                # await position_redis.set(liq_key, json.dumps({
+                #     "positions": liq_prices,
+                #     "to_liquidate": to_liquidate
+                # }))
+                if liq_prices:
+                    await position_redis.set(
+                        liq_key,
+                        json.dumps({"positions": liq_prices})
+                    )
+                else:
+                    await position_redis.delete(liq_key)
 
             except Exception:
                 logger.exception(f"Failed calculating liq prices for user")
