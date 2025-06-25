@@ -71,6 +71,15 @@ async def api_fetchPriceFromRedis(symbol:str):
         logger.exception("Error during fetching price from redis")
         return "Error during fetching price from redis"
 
+@router.post('/updateSymbolPrecision', summary='update symbol precision from the binance api', tags=["SETTINGS API"])
+async def api_updateSymbolPrecision():
+    try:
+        updateResult = settings.update_precision()
+        return updateResult
+    except Exception as e:
+        logger.exception("failed to update precision")
+        return "Error during updating symbol precisions"
+
 @router.get('/createSymbolCache', summary='create the symbol cache', tags=["SETTINGS API"])
 async def api_createSymbolCache():
     conn = None
@@ -138,6 +147,8 @@ async def api_createSymbolCache():
         if conn:
             try: conn.close()
             except: pass
+
+
 
 
 

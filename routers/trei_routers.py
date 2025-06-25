@@ -39,8 +39,6 @@ router= APIRouter()
 async def api_select(user_no: str, symbol: str, margin_type: int, leverage: int,price:float, usdt: Optional[float] = 0, amount: Optional[float] = 0,tp: Optional[float] = 0, sl: Optional[float] = 0):
 
     """
-
-    
     """
     mysql=MySQLAdapter()
     check = MakeErrorType()

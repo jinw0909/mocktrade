@@ -8,6 +8,7 @@ from pytz import timezone
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
+from services.settings import SettingsService
 from utils.connections import MySQLAdapter  # adjust if your adapter lives elsewhere
 from services.trading import TradingService
 from utils.local_redis import (update_position_status_to_redis,
@@ -35,6 +36,7 @@ SYMBOL_TO_COINGECKO_ID = {
 trader = TradingService()
 calculation = CalculationService()
 realtime = RealtimeService()
+svc = SettingsService()
 
 async def calculate_cross():
     try:
@@ -126,6 +128,19 @@ scheduler.add_job(
     id="statusUpdater",
     replace_existing=True
 )
+scheduler.add_job(
+    svc.reload_symbol_cache,
+    trigger=IntervalTrigger(days=1),
+    id="precisionCacheUpdater",
+    next_run_time=datetime.now(),
+    replace_existing=True
+)
+scheduler.add_job(
+    svc.update_precision,
+    trigger=IntervalTrigger(days=1),
+    id="precisionUpdater",
+    replace_existing=True
+)
 pnl_sec = int(config.get('PNL_INTERVAL'))
 scheduler.add_job(
     calculation.calculate_pnl,
@@ -153,6 +168,7 @@ scheduler.add_job(
 )
 
 
+
 def start_scheduler():
     """Call this on FastAPI startup."""
     scheduler.start()
@@ -164,7 +180,7 @@ def shutdown_scheduler():
         scheduler.shutdown(wait=False)
     except AttributeError:
         pass
-#
+
 # if __name__ == "__main__":
 #     import asyncio
 #     import logging

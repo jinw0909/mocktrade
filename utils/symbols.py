@@ -471,4 +471,4 @@ symbols: Dict[str, Dict[str, int]] = {
   'ZK': {'price': 7, 'qty': 0},
   'ZRO': {'price': 7, 'qty': 1},
   'ZRX': {'price': 4, 'qty': 1}
-  }
+}
