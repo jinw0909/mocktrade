@@ -157,7 +157,7 @@ class SettingsService(MySQLAdapter):
 
             # 3) iterate over each symbol in the API payload
             for entry in info.get("symbols", []):
-                full_sym = entry.get("symbols", "")
+                full_sym = entry.get("symbol", "")
                 if not full_sym.endswith("USDT"):
                     continue
 
