@@ -218,6 +218,7 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
                             "pos_id": info["pos_id"],
                             "symbol": symbol,
                             "current_price": info.get("market_price"),
+                            "liq_price": info.get("liq_price"),
                             "pnl": info.get("unrealized_pnl"),
                             "pnl_pct": info.get("unrealized_pnl_pct"),
                             "roi_pct": info.get("roi_pct"),
@@ -229,20 +230,20 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
                         logger.warning(f"User {user_id} — missing key {e.args[0]} for symbol {symbol}, skipping")
                         continue
 
-                liq_raw = await position_redis.get(liq_key)
-                if liq_raw:
-                    try:
-                        liq_info = json.loads(liq_raw)
-                        available = liq_info.get("available", 0.0)
-                        positions_liq = liq_info.get("positions", [])
-                        for pos in positions_liq:
-                            liq_list.append({
-                                "pos_id": pos["pos_id"],
-                                "symbol": pos["symbol"],
-                                "liq_price": pos["liq_price"]
-                            })
-                    except Exception as e:
-                        logger.warning(f"Failed to parse liquidation info for user {user_id}: {e!r}")
+                # liq_raw = await position_redis.get(liq_key)
+                # if liq_raw:
+                #     try:
+                #         liq_info = json.loads(liq_raw)
+                #         available = liq_info.get("available", 0.0)
+                #         positions_liq = liq_info.get("positions", [])
+                #         for pos in positions_liq:
+                #             liq_list.append({
+                #                 "pos_id": pos["pos_id"],
+                #                 "symbol": pos["symbol"],
+                #                 "liq_price": pos["liq_price"]
+                #             })
+                #     except Exception as e:
+                #         logger.warning(f"Failed to parse liquidation info for user {user_id}: {e!r}")
 
 
             # 2) Decide what to send
@@ -251,7 +252,7 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
                 total_pnl = sum(item.get("pnl") or 0.0 for item in updates)
                 payload   = {
                     "data": updates,
-                    "liq": liq_list,
+                    # "liq": liq_list,
                     "total": total_pnl,
                     "avbl": available
                 }

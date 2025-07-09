@@ -462,6 +462,57 @@ async def update_balance_status_per_user(user_id, retri_id = None):
             try: conn.close()
             except: pass
 
+# async def update_liq_price():
+#     logger.info("Uploading cross position liquidation prices to MySQL")
+#     conn = None
+#     cursor = None
+#     row_count = 0
+#
+#     try:
+#         conn = mysql._get_connection()
+#         cursor = conn.cursor()
+#
+#         async for key in redis_client.scan_iter("liq_prices:*"):
+#             raw = await redis_client.get(key)
+#             if not raw:
+#                 continue
+#             cursor.execute("SAVEPOINT liq_updt")
+#             try:
+#                 data = json.loads(raw)
+#                 positions = data.get("positions", [])
+#                 for pos in positions:
+#                     pos_id = pos.get("pos_id")
+#                     liq_price = pos.get("liq_price")
+#                     if pos_id is None or liq_price is None:
+#                         continue
+#
+#                     cursor.execute("""
+#                         UPDATE mocktrade.position_history
+#                         SET `liq_price` = %s
+#                         WHERE `id` = %s
+#                     """, (liq_price, pos_id))
+#
+#                     row_count += 1
+#
+#                 cursor.execute("RELEASE SAVEPOINT liq_updt")
+#
+#             except Exception as e:
+#                 logger.warning(f"Failed to parse or update {key} : {e}")
+#                 cursor.execute("ROLLBACK TO SAVEPOINT liq_updt")
+#                 cursor.execute("RELEASE SAVEPOINT liq_updt")
+#                 continue
+#
+#         conn.commit()
+#         logger.info(f"Updated {row_count} liquidation prices successfully to MySQL")
+#
+#     except Exception:
+#         logger.exception("failed to update liq price from redis to MySQL")
+#         conn.rollback()
+#
+#     finally:
+#         cursor and cursor.close()
+#         conn and conn.close()
+
 async def update_liq_price():
     logger.info("Uploading cross position liquidation prices to MySQL")
     conn = None
@@ -472,46 +523,61 @@ async def update_liq_price():
         conn = mysql._get_connection()
         cursor = conn.cursor()
 
-        async for key in redis_client.scan_iter("liq_prices:*"):
-            raw = await redis_client.get(key)
-            if not raw:
+        # Scan every user’s positions hash
+        async for pos_key in redis_client.scan_iter("positions:*"):
+            # pos_key is like "positions:447"
+            # fetch all field→JSON blobs
+            raw_hash = await redis_client.hgetall(pos_key)
+            if not raw_hash:
                 continue
-            cursor.execute("SAVEPOINT liq_updt")
-            try:
-                data = json.loads(raw)
-                positions = data.get("positions", [])
-                for pos in positions:
-                    pos_id = pos.get("pos_id")
-                    liq_price = pos.get("liq_price")
-                    if pos_id is None or liq_price is None:
-                        continue
 
-                    cursor.execute("""
+            # For each symbol entry in that hash
+            for symbol, blob in raw_hash.items():
+                # blob comes back as bytes; decode & parse
+                data = json.loads(blob)
+
+                # only update cross‐margin legs
+                if data.get("margin_type") != "cross":
+                    continue
+
+                pos_id    = data.get("pos_id")
+                liq_price = data.get("liq_price")
+                if pos_id is None or liq_price is None:
+                    continue
+
+                # Wrap each position update in a savepoint so one bad row won't kill the batch
+                cursor.execute("SAVEPOINT liq_updt")
+                try:
+                    cursor.execute(
+                        """
                         UPDATE mocktrade.position_history
-                        SET `liq_price` = %s
-                        WHERE `id` = %s 
-                    """, (liq_price, pos_id))
-
+                           SET liq_price = %s
+                         WHERE id = %s
+                        """,
+                        (liq_price, pos_id)
+                    )
                     row_count += 1
+                    cursor.execute("RELEASE SAVEPOINT liq_updt")
 
-                cursor.execute("RELEASE SAVEPOINT liq_updt")
-
-            except Exception as e:
-                logger.warning(f"Failed to parse or update {key} : {e}")
-                cursor.execute("ROLLBACK TO SAVEPOINT liq_updt")
-                cursor.execute("RELEASE SAVEPOINT liq_updt")
-                continue
+                except Exception as e:
+                    logger.warning(f"Failed updating pos_id={pos_id} : {e}")
+                    cursor.execute("ROLLBACK TO SAVEPOINT liq_updt")
+                    cursor.execute("RELEASE SAVEPOINT liq_updt")
+                    # continue to next leg
+                    continue
 
         conn.commit()
         logger.info(f"Updated {row_count} liquidation prices successfully to MySQL")
 
     except Exception:
-        logger.exception("failed to update liq price from redis to MySQL")
-        conn.rollback()
+        if conn:
+            conn.rollback()
+        logger.exception("Critical failure in update_liq_price")
 
     finally:
-        cursor and cursor.close()
-        conn and conn.close()
-
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 
