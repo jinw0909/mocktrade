@@ -333,10 +333,10 @@ def calculate_new_position(current_position, order):
         return {
             "user_id": user_id,
             "symbol": symbol,
-            "amount": 0,
+            "amount": cur_amt,
             "entry_price": None,
             "size": 0,
-            "margin": 0,
+            "margin": cur_margin,
             "leverage": 1,
             "side": cs,
             "margin_type": margin_type,
@@ -1360,7 +1360,16 @@ class CalculationService(MySQLAdapter):
                        AND `status` = 0
                 """, (symbol, user_id))
 
-            elif new_position.get('close'):  # position tp/sl or the only order tp/sl
+            elif new_position.get('close'):  # position tp/sl or order tp/sl that closes everything
+                if order.get('order_price', 0) == 0:
+                    cursor.execute("""
+                        UPDATE mocktrade.order_history
+                           SET `magin` = %s,
+                               `amount` = %s,
+                               `po_id` = %s 
+                         WHERE `id` = %s
+                    """, (new_position.get('margin', 0), new_position.get('amount', 0), current_id, order_id))
+
                 cursor.execute("""
                     UPDATE mocktrade.position_history
                        SET `pnl` = %s,
@@ -1621,6 +1630,5 @@ class CalculationService(MySQLAdapter):
         finally:
             cursor and cursor.close()
             conn and conn.close()
-
 
 

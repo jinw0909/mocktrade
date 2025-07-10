@@ -16,7 +16,7 @@ from utils.local_redis import (update_position_status_to_redis,
                                update_order_status_to_redis,
                                update_liq_price)
 from services.calculation import CalculationService
-from services.realtime import RealtimeService
+# from services.realtime import RealtimeService
 from starlette.config import Config
 
 config = Config(".env")
@@ -35,7 +35,7 @@ SYMBOL_TO_COINGECKO_ID = {
 # mysql = MySQLAdapter()
 trader = TradingService()
 calculation = CalculationService()
-realtime = RealtimeService()
+# realtime = RealtimeService()
 svc = SettingsService()
 
 async def calculate_cross():

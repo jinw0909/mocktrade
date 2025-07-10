@@ -580,4 +580,75 @@ async def update_liq_price():
         if conn:
             conn.close()
 
+# async def sync_tpsl_status_per_user(user_id, retri_id = None):
+#     logger.info("syncing position tpsl pointer for user {} ...", user_id)
+#     conn = None
+#     cursor = None
+#     row_count = 0
+#
+#     try:
+#         logger.info("hi")
+#         conn = mysql._get_connection()
+#         cursor = conn.cursor()
+#
+#         cursor.execute("""
+#             SELECT *
+#               FROM `mocktrade`.`order_history`
+#              WHERE `user_id` = %s
+#                AND `order_price` = 0
+#                AND `status` = 0
+#                AND `type` IN ('tp', 'sl')
+#         """, (user_id,))
+#
+#         order_rows = cursor.fetchall()
+#         if not order_rows:
+#             return
+#
+#         for order in order_rows:
+#             order_symbol = order['symbol']
+#             order_id = order['id']
+#
+#             if not order_symbol:
+#                 continue
+#
+#             cursor.execute("""
+#                 SELECT *
+#                   FROM `mocktrade`.`position_history`
+#                  WHERE `symbol` = %s
+#                    AND `user_id` = %s
+#                    AND `status` = 1
+#               ORDER BY `id` DESC
+#                  LIMIT 1
+#             """, (order_symbol, user_id))
+#
+#             current_position = cursor.fetchone()
+#             if not current_position:
+#                 continue
+#
+#             current_price = current_position.get('price')
+#             if not current_price:
+#                 continue
+#             current_position_id = current_position.get['id']
+#
+#             cursor.execute("""
+#                 UPDATE `mocktrade`.`order_history`
+#                 SET `price` = %s,
+#                     ``
+#                 WHERE ``
+#             """)
+#
+#
+#
+#
+#     except Exception:
+#         if conn:
+#             conn.rollback()
+#         logger.warning("error occurred syncing position tpsl pointer for user {}", user_id)
+#     finally:
+#         if cursor:
+#             cursor.close()
+#         if conn:
+#             conn.close()
+
+
 
