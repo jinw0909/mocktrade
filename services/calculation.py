@@ -718,12 +718,40 @@ class CalculationService(MySQLAdapter):
                 cross = [p for p in positions if p["margin_type"] == "cross"]
 
                 # 1) ensure each leg has a market_price
+                valid_cross = []
                 for p in cross:
-                    mp = p.get("market_price")
-                    if mp is None:
-                        raw = await price_redis.get(f"price:{p['symbol']}USDT")
-                        mp = float(raw) if raw else p["entry_price"]
-                    p["market_price"] = mp
+                    redis_key = f"price:{p['symbol']}USDT"
+                    raw = await price_redis.get(redis_key)
+
+                    if raw is None:
+                        logger.warning(
+                            f"No fresh price for {p['symbol']}, skipping liquidation check for pos_id={p['pos_id']}"
+                        )
+                        continue
+
+                    try:
+                        p["market_price"] = float(raw)
+                    except ValueError:
+                        logger.error(
+                            f"Invalid price for {p['symbol']} ({raw!r}), skipping pos_id={p['pos_id']}"
+                        )
+                        continue
+
+
+                    valid_cross.append(p)
+                    # mp = p.get("market_price")
+                    # if mp is None:
+                    #     raw = await price_redis.get(f"price:{p['symbol']}USDT")
+                    #     mp = float(raw) if raw else p["entry_price"]
+                    # p["market_price"] = mp
+
+                if len(valid_cross) != len(cross):
+                    logger.warning(
+                        f"Skipping user {user_id}: missing prices for symbols"
+                    )
+                    continue
+
+                cross = valid_cross
 
                 # 2) precompute other‐legs TMM & UPNL
                 other_tmm = {
@@ -769,10 +797,31 @@ class CalculationService(MySQLAdapter):
                     )
                     den = S * MAINTENANCE_RATE - side * S
 
-                    # final liquidation price
-                    lp = num / den if den != 0 else 0.0
-                    lp = max(lp, 0.0)
+                    # -- FIX: skip if denominator is zero --
+                    if den == 0:
+                        logger.warning(f"Denominator zero for pos_id={pid}, skipping liquidation calc")
+                        continue
 
+                    # compute the raw liquidation price
+                    raw_lp = num / den
+
+                    # ── Side‑aware handling of non‑positive LP ──
+                    if side == -1 and raw_lp <= 0:
+                        # short leg whose LP would be ≤0 → skip it entirely
+                        logger.info(f"Short pos_id={pid} has non‑positive LP ({raw_lp:.2f}), skipping")
+                        continue
+
+                    if side ==  1 and raw_lp <= 0:
+                        # long leg whose LP is ≤0 → clamp to zero
+                        lp = 0.0
+                    else:
+                        lp = raw_lp
+
+                    # # final liquidation price
+                    # lp = num / den if den != 0 else 0.0
+                    # lp = max(lp, 0.0)
+
+                    # now lp is guaranteed > 0
                     liq_prices.append({
                         "pos_id": pid,
                         "symbol": p["symbol"],
@@ -1265,9 +1314,9 @@ class CalculationService(MySQLAdapter):
                     cursor.execute("""
                                 INSERT INTO mocktrade.order_history (
                                     user_id, symbol, `type`, margin_type, magin, leverage, side, amount, status
-                                    ,insert_time, update_time, tp, or_id, order_price)
+                                    ,insert_time, update_time, tp, sl, or_id, order_price)
                                 VALUES (
-                                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s )
+                                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,0,%s,%s )
                             """, (
                         user_id,
                         symbol,
@@ -1290,9 +1339,9 @@ class CalculationService(MySQLAdapter):
                     cursor.execute("""
                                 INSERT INTO mocktrade.order_history (
                                     user_id, symbol, `type`, margin_type, magin, leverage, side, amount, status
-                                    ,insert_time, update_time, sl, or_id, order_price)
+                                    ,insert_time, update_time, sl, tp, or_id, order_price)
                                 VALUES (
-                                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,0,%s,%s)
                             """, (
                         user_id,
                         symbol,
