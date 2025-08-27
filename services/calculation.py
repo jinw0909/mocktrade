@@ -811,7 +811,7 @@ class CalculationService(MySQLAdapter):
                         logger.info(f"Short pos_id={pid} has non‑positive LP ({raw_lp:.2f}), skipping")
                         continue
 
-                    if side ==  1 and raw_lp <= 0:
+                    if side == 1 and raw_lp <= 0:
                         # long leg whose LP is ≤0 → clamp to zero
                         lp = 0.0
                     else:

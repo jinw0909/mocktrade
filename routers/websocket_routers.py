@@ -220,8 +220,10 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
                             "current_price": info.get("market_price"),
                             "liq_price": info.get("liq_price"),
                             "pnl": info.get("unrealized_pnl"),
-                            "pnl_pct": info.get("unrealized_pnl_pct"),
-                            "roi_pct": info.get("roi_pct"),
+                            "pnl_pct": info.get("roi_pct"),
+                            # "pnl_pct": info.get("unrealized_pnl_pct"),
+                            "roi_pct": info.get("unrealized_pnl_pct"),
+                            # "roi_pct": info.get("roi_pct"),
                         }
 
                         updates.append(payload_data)
