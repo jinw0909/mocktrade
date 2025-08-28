@@ -270,7 +270,7 @@ scheduler.add_job(
     svc.reload_symbol_cache,
     trigger=IntervalTrigger(days=1),
     id="precisionCacheUpdater",
-    next_run_time=datetime.now(),
+    next_run_time=datetime.now(TZ),
     replace_existing=True
 )
 scheduler.add_job(
@@ -312,7 +312,7 @@ scheduler.add_job(
     replace_existing=True,
     max_instances=1,
     coalesce=True,
-    misfire_grace_time=3600,
+    misfire_grace_time=24*3600,
 )
 
 
