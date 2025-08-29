@@ -54,7 +54,7 @@ greenlet==3.0.3
 gunicorn==23.0.0
 h11==0.14.0
 h5py==3.13.0
-habanero==2.2.0
+habanero
 hitran-api==1.2.2.3
 hjson==3.1.0
 html5lib==1.1
