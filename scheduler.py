@@ -26,6 +26,11 @@ from starlette.config import Config
 from pathlib import Path
 from datetime import datetime
 
+import tempfile, gzip, shutil
+import boto3
+from botocore.config import Config as BotoConfig
+from boto3.s3.transfer import TransferConfig
+
 config = Config(".env")
 logger = logging.getLogger(__name__)
 logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
@@ -45,8 +50,24 @@ calculation = CalculationService()
 # realtime = RealtimeService()
 svc = SettingsService()
 
-# if not BACKUP_DIR.is_absolute():
-#     BACKUP_DIR = (BASE_DIR / BACKUP_DIR).resolve()
+session = boto3.Session()  # will honor env vars & ~/.aws/credentials
+sts = session.client("sts")
+print("CallerIdentity:", sts.get_caller_identity())
+
+s3 = session.client("s3", config=BotoConfig(retries={"max_attempts": 3, "mode": "standard"}))
+print("S3 region (client config):", s3.meta.config.region_name)
+
+import boto3, botocore
+bucket = "mocktrade-dumps"
+key = "local/mysqldump_202508291103.sql.gz"
+
+s3 = boto3.client("s3")
+try:
+    head = s3.head_object(Bucket=bucket, Key=key)
+    print("FOUND:", head["ContentLength"], "bytes")
+except botocore.exceptions.ClientError as e:
+    print("HEAD failed:", e.response["Error"]["Code"], e.response["Error"].get("Message"))
+
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -126,7 +147,99 @@ async def daily_mysql_dump_simple():
     except Exception:
         logger.exception("daily_mysql_dump_simple failed")
 
-import tempfile, gzip, shutil
+# async def daily_mysql_dump_s3():
+#     tmp_path = None
+#     try:
+#         # ---- config
+#         date_str = datetime.now(TZ).strftime("%Y%m%d%H%M")
+#         bucket   = config.get("S3_BUCKET", default="your-bucket-name")
+#         prefix   = config.get("S3_PREFIX", default="db-backups/mocktrade").strip().strip("/")
+#         s3_key   = f"{prefix}/mysqldump_{date_str}.sql.gz"
+#
+#         mysqldump = shutil.which(config.get("MYSQLDUMP_BIN", default="mysqldump")) or "mysqldump"
+#         aws_bin   = shutil.which("aws") or "/usr/bin/aws"  # adjust for macOS: /opt/homebrew/bin/aws
+#
+#         if not shutil.which(mysqldump):
+#             raise RuntimeError(f"mysqldump not found at {mysqldump}")
+#         if not shutil.which(aws_bin):
+#             raise RuntimeError(f"AWS CLI not found at {aws_bin}")
+#
+#         dump_cmd = [
+#             mysqldump,
+#             f"--host={config.get('HOST')}",
+#             f"--user={config.get('USER1')}",
+#             f"--password={config.get('PASS')}",
+#             "--default-character-set=utf8mb4",
+#             "--single-transaction", "--quick",
+#             "--routines", "--triggers", "--events",
+#             "--set-gtid-purged=OFF",
+#             config.get("DBNAME"),
+#         ]
+#         logger.info(f"[dump] starting mysqldump for DB={config.get('DBNAME')} -> s3://{bucket}/{s3_key}")
+#
+#         # ---- run mysqldump
+#         p_dump = await asyncio.create_subprocess_exec(
+#             *dump_cmd,
+#             stdout=asyncio.subprocess.PIPE,
+#             stderr=asyncio.subprocess.PIPE,
+#         )
+#
+#         # drain stderr concurrently to avoid buffer buildup
+#         async def _drain_stderr(proc):
+#             return await proc.stderr.read()
+#         stderr_task = asyncio.create_task(_drain_stderr(p_dump))
+#
+#         # ---- write gzip to a temp file
+#         with tempfile.NamedTemporaryFile(delete=False, suffix=".sql.gz") as tmp:
+#             tmp_path = Path(tmp.name)  # remember path, close handle immediately
+#         bytes_written = 0
+#         # compresslevel=6 is a good default (speed/size)
+#         with gzip.open(tmp_path, "wb", compresslevel=6) as gz:
+#             while True:
+#                 chunk = await p_dump.stdout.read(1024 * 1024)  # 1MB
+#                 if not chunk:
+#                     break
+#                 gz.write(chunk)
+#                 bytes_written += len(chunk)
+#
+#         # ensure dump finished
+#         rc = await p_dump.wait()
+#         dump_err = await stderr_task
+#         if rc != 0:
+#             raise RuntimeError(f"mysqldump failed ({rc}): {dump_err.decode(errors='ignore')}")
+#
+#         size_mb = os.path.getsize(tmp_path) / (1024 * 1024)
+#         logger.info(f"[dump] temp gzip written: {tmp_path} ({size_mb:.2f} MB uncompressed_in≈{bytes_written/1024/1024:.2f} MB)")
+#
+#         # ---- upload to S3
+#         aws_cmd = [
+#             aws_bin, "s3", "cp", str(tmp_path), f"s3://{bucket}/{s3_key}",
+#             "--content-type", "application/gzip",
+#             "--storage-class", config.get("S3_STORAGE_CLASS", default="STANDARD_IA"),
+#             "--sse", config.get("S3_SSE", default="AES256"),
+#             "--no-progress",
+#         ]
+#         p_aws = await asyncio.create_subprocess_exec(
+#             *aws_cmd,
+#             stdout=asyncio.subprocess.PIPE,
+#             stderr=asyncio.subprocess.PIPE,
+#         )
+#         out, err = await p_aws.communicate()
+#         if p_aws.returncode != 0:
+#             raise RuntimeError(f"aws s3 cp failed ({p_aws.returncode}): {err.decode(errors='ignore')}")
+#
+#         logger.info(f"[dump] uploaded to s3://{bucket}/{s3_key}")
+#
+#     except Exception:
+#         logger.exception("daily_mysql_dump_s3 failed")
+#     finally:
+#         # always remove the temp file
+#         try:
+#             if tmp_path and tmp_path.exists():
+#                 tmp_path.unlink()
+#                 logger.info(f"[dump] temp file removed: {tmp_path}")
+#         except Exception as e:
+#             logger.warning(f"[dump] failed to remove temp file {tmp_path}: {e}")
 
 async def daily_mysql_dump_s3():
     tmp_path = None
@@ -138,12 +251,8 @@ async def daily_mysql_dump_s3():
         s3_key   = f"{prefix}/mysqldump_{date_str}.sql.gz"
 
         mysqldump = shutil.which(config.get("MYSQLDUMP_BIN", default="mysqldump")) or "mysqldump"
-        aws_bin   = shutil.which("aws") or "/usr/bin/aws"  # adjust for macOS: /opt/homebrew/bin/aws
-
         if not shutil.which(mysqldump):
             raise RuntimeError(f"mysqldump not found at {mysqldump}")
-        if not shutil.which(aws_bin):
-            raise RuntimeError(f"AWS CLI not found at {aws_bin}")
 
         dump_cmd = [
             mysqldump,
@@ -172,8 +281,9 @@ async def daily_mysql_dump_s3():
 
         # ---- write gzip to a temp file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".sql.gz") as tmp:
-            tmp_path = Path(tmp.name)  # remember path, close handle immediately
+            tmp_path = Path(tmp.name)
         bytes_written = 0
+
         # compresslevel=6 is a good default (speed/size)
         with gzip.open(tmp_path, "wb", compresslevel=6) as gz:
             while True:
@@ -192,22 +302,48 @@ async def daily_mysql_dump_s3():
         size_mb = os.path.getsize(tmp_path) / (1024 * 1024)
         logger.info(f"[dump] temp gzip written: {tmp_path} ({size_mb:.2f} MB uncompressed_in≈{bytes_written/1024/1024:.2f} MB)")
 
-        # ---- upload to S3
-        aws_cmd = [
-            aws_bin, "s3", "cp", str(tmp_path), f"s3://{bucket}/{s3_key}",
-            "--content-type", "application/gzip",
-            "--storage-class", config.get("S3_STORAGE_CLASS", default="STANDARD_IA"),
-            "--sse", config.get("S3_SSE", default="AES256"),
-            "--no-progress",
-        ]
-        p_aws = await asyncio.create_subprocess_exec(
-            *aws_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        # ---- boto3 client with sane retries
+        boto_cfg = BotoConfig(
+            retries={"max_attempts": 8, "mode": "adaptive"},
+            # Optionally set region if you want to force it:
+            # region_name=config.get("AWS_REGION", default=None),
         )
-        out, err = await p_aws.communicate()
-        if p_aws.returncode != 0:
-            raise RuntimeError(f"aws s3 cp failed ({p_aws.returncode}): {err.decode(errors='ignore')}")
+        s3 = boto3.client("s3", config=boto_cfg)
+
+        # multipart transfer config (tune thresholds if needed)
+        transfer_cfg = TransferConfig(
+            multipart_threshold=64 * 1024 * 1024,  # 64MB
+            multipart_chunksize=16 * 1024 * 1024,  # 16MB
+            max_concurrency=10,  # parallel parts
+            use_threads=True,
+        )
+
+        # Extra headers
+        sse_algo = config.get("S3_SSE", default="AES256")  # "AES256" or "aws:kms"
+        extra_args = {
+            "ContentType": "application/gzip",
+            # "ContentEncoding": "gzip",
+            "StorageClass": config.get("S3_STORAGE_CLASS", default="STANDARD_IA"),
+            "ServerSideEncryption": sse_algo,
+            "ContentDisposition": f'attachment; filename="{Path(s3_key).name}"',
+        }
+        if sse_algo == "aws:kms":
+            kms_key_id = config.get("S3_KMS_KEY_ID", default=None)
+            if kms_key_id:
+                extra_args["SSEKMSKeyId"] = kms_key_id
+
+        # ---- upload (boto3 is sync; offload to thread to avoid blocking event loop)
+        def _upload():
+            # use upload_file for resumable multipart & retries
+            s3.upload_file(
+                Filename=str(tmp_path),
+                Bucket=bucket,
+                Key=s3_key,
+                ExtraArgs=extra_args,
+                Config=transfer_cfg,
+            )
+
+        await asyncio.to_thread(_upload)
 
         logger.info(f"[dump] uploaded to s3://{bucket}/{s3_key}")
 
@@ -230,7 +366,6 @@ async def calculate_cross():
             f"calculating cross position liquidation price at {datetime.now(timezone('Asia/Seoul'))}. Total {row_count} liquidation price derived")
     except Exception:
         logger.exception("Error during calculating cross position liquidation price")
-
 
 async def liquidate_cross():
     try:
