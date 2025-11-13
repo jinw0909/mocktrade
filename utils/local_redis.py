@@ -21,38 +21,146 @@ price_redis = aioredis.Redis(
 )
 
 mysql = MySQLAdapter()
+# async def update_position_status_to_redis():
+#     logger.info("Updating MySQL position status to the local Redis")
+#     conn = mysql._get_connection()
+#     cursor = conn.cursor()
+#     try:
+#         # 1) load all active positions
+#         cursor.execute("""
+#             SELECT
+#                    ph.`id` AS `pos_id`,
+#                    ph.`status` AS `status`,
+#                    ph.`user_id`,
+#                    symbol, size, amount, entry_price, liq_price, margin, pnl, margin_type, side, leverage, tp, sl, close_price, unrealized_pnl, unrealized_pnl_pct,
+#                    u.retri_id
+#               FROM `mocktrade`.`position_history` as ph
+#               JOIN `mocktrade`.`user` AS u
+#                 ON ph.user_id = u.id
+#              WHERE ph.status = 1
+#         """)
+#         rows = cursor.fetchall()
+#
+#         # 2) Group by retri_id
+#         positions_by_user = {}
+#         for r in rows:
+#             uid = r["retri_id"]
+#             symbol = r["symbol"]
+#             amount = float(r["amount"])
+#             entry_price = float(r["entry_price"])
+#             side = r["side"]
+#             leverage = int(r["leverage"]) if r["leverage"] else 1.0
+#             margin_type = r["margin_type"]
+#
+#             # Get current price from Redis
+#             price_key = f"price:{symbol}USDT"
+#             price_raw = await price_redis.get(price_key)
+#             try:
+#                 current_price = float(price_raw) if price_raw else entry_price
+#             except:
+#                 current_price = entry_price
+#
+#             # Recalculate size
+#             size = current_price * amount
+#             # Recalculate margin if cross
+#             margin = float(r["margin"])
+#             if margin_type == 'cross' and leverage:
+#                 margin = size / leverage
+#             # Recalculate PnL
+#             if side == 'buy':
+#                 pnl = (current_price - entry_price) * amount
+#             else:
+#                 pnl = (entry_price - current_price) * amount
+#
+#             pnl_pct = (pnl / (entry_price * amount)) * 100 if entry_price else 0.0
+#             roi_pct = (pnl / margin) * 100 if margin else 0.0
+#
+#             positions_by_user.setdefault(uid, []).append({
+#                 "pos_id": r['pos_id'],
+#                 "user_id": r['user_id'],
+#                 "symbol": symbol,
+#                 "entry_price": entry_price,
+#                 "liq_price": float(r["liq_price"]),
+#                 "market_price": current_price,
+#                 "amount": amount,
+#                 "side": side,
+#                 "margin": margin,
+#                 "margin_type": margin_type,
+#                 "size": size,
+#                 "leverage": leverage,
+#                 "tp": r["tp"],
+#                 "sl": r["sl"],
+#                 "unrealized_pnl": pnl,
+#                 "unrealized_pnl_pct": pnl_pct,
+#                 "roi_pct": roi_pct
+#             })
+#
+#         # 3) overwrite each active user's Redis hash
+#         for uid, pos_list in positions_by_user.items():
+#             key = f"positions:{uid}"
+#             # Start by deleting old data for this user
+#             await redis_client.delete(key)
+#             # Then HSET symbol -> JSON for each position
+#             mapping = { p["symbol"]: json.dumps(p) for p in pos_list }
+#             if mapping:
+#                 await redis_client.hset(key, mapping=mapping)
+#
+#         # 4) remove any leftover "positions:{uid}" keys for users who no longer have active positions + availables:{uid}
+#         async for key in redis_client.scan_iter("positions:*"):
+#             # extract uid portion
+#             try:
+#                 _, uid = key.split(":", 1)
+#             except ValueError:
+#                 continue
+#             if uid not in positions_by_user:
+#                 await redis_client.delete(key)
+#
+#         logger.info(f"Updated positions for {len(positions_by_user)} users at {datetime.now(timezone('Asia/Seoul'))}")
+#
+#     except Exception:
+#         logger.exception("Failed to update position status to Redis")
+#     finally:
+#         cursor.close()
+#         conn.close()
+
+
 async def update_position_status_to_redis():
     logger.info("Updating MySQL position status to the local Redis")
     conn = mysql._get_connection()
     cursor = conn.cursor()
+
     try:
         # 1) load all active positions
         cursor.execute("""
-            SELECT 
-                   ph.`id` AS `pos_id`,
-                   ph.`status` AS `status`,
-                   ph.`user_id`,
-                   symbol, size, amount, entry_price, liq_price, margin, pnl, margin_type, side, leverage, tp, sl, close_price, unrealized_pnl, unrealized_pnl_pct,
-                   u.retri_id
-              FROM `mocktrade`.`position_history` as ph
-              JOIN `mocktrade`.`user` AS u
-                ON ph.user_id = u.id 
-             WHERE ph.status = 1
-        """)
+                       SELECT
+                           ph.`id` AS `pos_id`,
+                           ph.`status` AS `status`,
+                           ph.`user_id`,
+                           symbol, size, amount, entry_price, liq_price, margin, pnl,
+                           margin_type, side, leverage, tp, sl, close_price,
+                           unrealized_pnl, unrealized_pnl_pct,
+                           u.retri_id
+                       FROM mocktrade.position_history ph
+                                JOIN mocktrade.user u
+                                     ON ph.user_id = u.id
+                       WHERE ph.status = 1
+                       """)
         rows = cursor.fetchall()
 
-        # 2) Group by retri_id
         positions_by_user = {}
+
         for r in rows:
             uid = r["retri_id"]
             symbol = r["symbol"]
+            user_key = f"positions:{uid}"
+
             amount = float(r["amount"])
             entry_price = float(r["entry_price"])
             side = r["side"]
-            leverage = int(r["leverage"]) if r["leverage"] else 1.0
+            leverage = int(r["leverage"]) if r["leverage"] else 1
             margin_type = r["margin_type"]
 
-            # Get current price from Redis
+            # Get current price
             price_key = f"price:{symbol}USDT"
             price_raw = await price_redis.get(price_key)
             try:
@@ -60,14 +168,13 @@ async def update_position_status_to_redis():
             except:
                 current_price = entry_price
 
-            # Recalculate size
             size = current_price * amount
-            # Recalculate margin if cross
+
             margin = float(r["margin"])
-            if margin_type == 'cross' and leverage:
+            if margin_type == "cross" and leverage:
                 margin = size / leverage
-            # Recalculate PnL
-            if side == 'buy':
+
+            if side == "buy":
                 pnl = (current_price - entry_price) * amount
             else:
                 pnl = (entry_price - current_price) * amount
@@ -75,12 +182,28 @@ async def update_position_status_to_redis():
             pnl_pct = (pnl / (entry_price * amount)) * 100 if entry_price else 0.0
             roi_pct = (pnl / margin) * 100 if margin else 0.0
 
+            # ⭐ FIX 1: read existing redis value (to preserve computed liq_price)
+            existing_blob = await redis_client.hget(user_key, symbol)
+            if existing_blob:
+                try:
+                    existing_liq = json.loads(existing_blob).get("liq_price")
+                except:
+                    existing_liq = None
+            else:
+                existing_liq = None
+
+            # ⭐ FIX 2: choose correct liq_price source
+            # Redis has priority because it contains NEWLY computed values
+            final_liq_price = (
+                existing_liq if existing_liq is not None else float(r["liq_price"])
+            )
+
             positions_by_user.setdefault(uid, []).append({
-                "pos_id": r['pos_id'],
-                "user_id": r['user_id'],
+                "pos_id": r["pos_id"],
+                "user_id": r["user_id"],
                 "symbol": symbol,
                 "entry_price": entry_price,
-                "liq_price": float(r["liq_price"]),
+                "liq_price": final_liq_price,   # ⭐ FIX 3 — use selected value
                 "market_price": current_price,
                 "amount": amount,
                 "side": side,
@@ -95,19 +218,18 @@ async def update_position_status_to_redis():
                 "roi_pct": roi_pct
             })
 
-        # 3) overwrite each active user's Redis hash
+        # 3) Write to Redis
         for uid, pos_list in positions_by_user.items():
             key = f"positions:{uid}"
-            # Start by deleting old data for this user
+
             await redis_client.delete(key)
-            # Then HSET symbol -> JSON for each position
-            mapping = { p["symbol"]: json.dumps(p) for p in pos_list }
+
+            mapping = {p["symbol"]: json.dumps(p) for p in pos_list}
             if mapping:
                 await redis_client.hset(key, mapping=mapping)
 
-        # 4) remove any leftover "positions:{uid}" keys for users who no longer have active positions + availables:{uid}
+        # 4) cleanup stale users
         async for key in redis_client.scan_iter("positions:*"):
-            # extract uid portion
             try:
                 _, uid = key.split(":", 1)
             except ValueError:
@@ -115,13 +237,18 @@ async def update_position_status_to_redis():
             if uid not in positions_by_user:
                 await redis_client.delete(key)
 
-        logger.info(f"Updated positions for {len(positions_by_user)} users at {datetime.now(timezone('Asia/Seoul'))}")
+        logger.info(
+            f"Updated positions for {len(positions_by_user)} users at "
+            f"{datetime.now(timezone('Asia/Seoul'))}"
+        )
 
     except Exception:
         logger.exception("Failed to update position status to Redis")
+
     finally:
         cursor.close()
         conn.close()
+
 
 async def update_position_status_per_user(user_id, retri_id):
     conn = None
@@ -545,6 +672,7 @@ async def update_liq_price():
                 if pos_id is None or liq_price is None:
                     continue
 
+                logger.info(f"Updating liquidation price for pos_id={pos_id} with liq_price={liq_price}")
                 # Wrap each position update in a savepoint so one bad row won't kill the batch
                 cursor.execute("SAVEPOINT liq_updt")
                 try:
