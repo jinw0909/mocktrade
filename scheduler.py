@@ -7,6 +7,7 @@ import requests
 import logging
 import gzip
 import os
+import fcntl
 
 from pytz import timezone
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -31,9 +32,17 @@ import boto3
 from botocore.config import Config as BotoConfig
 from boto3.s3.transfer import TransferConfig
 
+
+
 config = Config(".env")
 logger = logging.getLogger(__name__)
 logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
+
+# 락 관련 전역 변수들 추가
+_LOCK_PATH = "/tmp/mocktrade_scheduler.lock"  # 앱 전용 락 파일 경로
+_lock_fd = None
+_scheduler_started = False
+
 # CoinGecko simple price endpoint
 API_ENDPOINT = "https://api.coingecko.com/api/v3/simple/price"
 TZ = timezone("Asia/Seoul")
@@ -485,44 +494,89 @@ scheduler.add_job(
     id="orderSettler",
     replace_existing=True
 )
-scheduler.add_job(
-    # daily_mysql_dump_simple,
-    daily_mysql_dump_s3,
-    trigger=CronTrigger(hour=3, minute=15, timezone='Asia/Seoul'),
-    next_run_time=datetime.now(),
-    id='mysqlDailyDump',
-    replace_existing=True,
-    max_instances=1,
-    coalesce=True,
-    misfire_grace_time=24*3600,
-)
+schedule_dump = config.get("SCHEDULE_DUMP", default="false").lower() == "true"
+if schedule_dump:
+    scheduler.add_job(
+        # daily_mysql_dump_simple,
+        daily_mysql_dump_s3,
+        trigger=CronTrigger(hour=3, minute=15, timezone='Asia/Seoul'),
+        next_run_time=datetime.now(),
+        id='mysqlDailyDump',
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=24*3600,
+    )
 
+
+def _acquire_process_lock() -> bool:
+    """
+    여러 gunicorn worker 중에서 딱 1개만 락을 잡도록 하는 함수.
+    락을 잡은 프로세스만 scheduler를 시작한다.
+    """
+    global _lock_fd
+    try:
+        fd = os.open(_LOCK_PATH, os.O_CREAT | os.O_RDWR)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # 논블로킹 락
+        _lock_fd = fd
+        logger.info("Scheduler lock acquired in PID %s", os.getpid())
+        return True
+    except BlockingIOError:
+        # 이미 다른 프로세스가 락을 가지고 있음
+        logger.info("Scheduler lock already held by another process. PID %s skips.", os.getpid())
+        return False
+    except Exception as e:
+        logger.exception("Failed to acquire scheduler lock: %s", e)
+        return False
+
+#
+# def start_scheduler():
+#     """Call this on FastAPI startup."""
+#     scheduler.start()
 
 def start_scheduler():
     """Call this on FastAPI startup."""
-    scheduler.start()
+    global _scheduler_started
 
+    if _scheduler_started:
+        logger.info("Scheduler already started in this process, skipping.")
+        return
+
+    # 🔒 먼저 락을 시도해서 '리더' 프로세스만 스케줄러 실행
+    if not _acquire_process_lock():
+        # 다른 worker가 이미 스케줄러를 돌리고 있음
+        return
+
+    logger.info("Starting APScheduler in PID %s", os.getpid())
+    scheduler.start()
+    _scheduler_started = True
+
+#
+# def shutdown_scheduler():
+#     """Call this on FastAPI shutdown."""
+#     try:
+#         scheduler.shutdown(wait=False)
+#     except AttributeError:
+#         pass
 
 def shutdown_scheduler():
     """Call this on FastAPI shutdown."""
-    try:
-        scheduler.shutdown(wait=False)
-    except AttributeError:
-        pass
+    global _scheduler_started, _lock_fd
 
-# if __name__ == "__main__":
-#     import asyncio
-#     import logging
-#
-#     logging.basicConfig(level=logging.INFO)
-#     logger.info("Starting standalone APScheduler service...")
-#
-#     async def start():
-#         start_scheduler()
-#
-#     loop = asyncio.new_event_loop()
-#     asyncio.set_event_loop(loop)
-#     loop.run_until_complete(start())
-#     loop.run_forever()
+    if _scheduler_started:
+        logger.info("Shutting down APScheduler in PID %s", os.getpid())
+        try:
+            scheduler.shutdown(wait=False)
+        except Exception as e:
+            logger.warning("Error during scheduler shutdown: %s", e)
+        _scheduler_started = False
 
-
+    # 락 해제
+    if _lock_fd is not None:
+        try:
+            fcntl.flock(_lock_fd, fcntl.LOCK_UN)
+            os.close(_lock_fd)
+            logger.info("Scheduler lock released in PID %s", os.getpid())
+        except OSError:
+            pass
+        _lock_fd = None
