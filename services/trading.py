@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 from utils.connections import MySQLAdapter
 from starlette.config import Config
@@ -10,7 +11,6 @@ from collections import defaultdict
 import logging
 
 from utils.symbols import symbols as SYMBOL_CFG
-from utils.connection_manager import manager
 from utils.local_redis import update_position_status_per_user, update_order_status_per_user, update_balance_status_per_user
 config = Config('.env')
 redis_client = aioredis.Redis(
@@ -793,10 +793,10 @@ class TradingService(MySQLAdapter):
             # logger.info(f"pending notifs: {pending_notifs}")
             if pending_notifs:
                 for retri_id, message in pending_notifs:
-                    # schedule on the same loop
-                    await asyncio.create_task(
-                        manager.notify_user(retri_id, message)
-                    )
+                    # store JSON payload, expireafter 60s just in case
+                    signal_key = f"signal:{retri_id}"
+                    await redis_client.set(signal_key, json.dumps(message), ex=60)
+
             if updated_users:
                 logger.info(f"updated_users: {updated_users}")
                 for user_id, retri_id in updated_users.items():
@@ -1056,10 +1056,9 @@ class TradingService(MySQLAdapter):
 
             conn.commit()
             if pending_notifs:
-                for user_id, message in pending_notifs:
-                    await asyncio.create_task(
-                        manager.notify_user(user_id, message)
-                    )
+                for retri_id, message in pending_notifs:
+                    signal_key = f"signal:{retri_id}"
+                    await redis_client.set(signal_key, json.dumps(message), ex=60)
             if updated_users:
                 for user_id, retri_id in updated_users.items():
                     await update_position_status_per_user(user_id, retri_id)
@@ -1319,9 +1318,9 @@ class TradingService(MySQLAdapter):
 
             for retri_id, message in pending_notifs:
                 # schedule on the same loop
-                await asyncio.create_task(
-                    manager.notify_user(retri_id, message)
-                )
+                signal_key = f"signal:{retri_id}"
+                await redis_client.set(signal_key, json.dumps(message), ex=60)
+
             for user_id, retri_id in liquidated_users.items():
                 await update_position_status_per_user(user_id, retri_id)
                 await update_order_status_per_user(user_id, retri_id)
@@ -1450,10 +1449,9 @@ class TradingService(MySQLAdapter):
 
             conn.commit()
             for user_id, messages in pending_notifs:
-                if len(messages.get('positions')) > 0:
-                    await asyncio.create_task(
-                        manager.notify_user(user_id, messages)
-                    )
+                if message.get('positions'):
+                    signal_key = f"signal:{retri_id}"
+                    await redis_client.set(signal_key, json.dumps(message), ex=60)
 
             return { "row_count": row_count }
 
@@ -1579,9 +1577,9 @@ class TradingService(MySQLAdapter):
 
             conn.commit()
             for retri_id, message in pending_notifs:
-                await asyncio.create_task(
-                    manager.notify_user(retri_id, message)
-                )
+                signal_key = f"signal:{retri_id}"
+                await redis_client.set(signal_key, json.dumps(message), ex=60)
+
             for user_id, retri_id in liquidated_users.items():
                 await update_position_status_per_user(user_id, retri_id)
                 await update_order_status_per_user(user_id, retri_id)

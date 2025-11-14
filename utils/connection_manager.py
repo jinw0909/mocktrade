@@ -1,4 +1,5 @@
 import logging
+import os
 
 from fastapi import WebSocket
 from typing import Dict, List
@@ -14,6 +15,7 @@ class ConnectionManager:
 
     async def connect(self, user_id:str, ws: WebSocket):
         # Close any existing connections
+        logger.info(f"[connect] PID={os.getpid()} manager_id={id(self)} user={user_id}")
         for existing_ws in self.active.get(user_id, []):
             try:
                 await existing_ws.close(code=1000)
@@ -33,6 +35,7 @@ class ConnectionManager:
 
     async def notify_user(self, user_id: str, message: dict):
         """Send a JSON message to every WS for that user"""
+        logger.info(f"[notify] PID={os.getpid()} manager_id={id(self)} user={user_id} active_keys={list(self.active.keys())}")
         logger.info(f"Sending WS to {user_id}: {message}")
         payload = jsonable_encoder(message)
         for ws in list(self.active.get(user_id, [])):

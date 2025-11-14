@@ -14,8 +14,10 @@ import redis.asyncio as aioredis
 from utils.connections import MySQLAdapter
 
 router = APIRouter()
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pnl_ws")
 config = Config('.env')
+
 
 from utils.connections import MySQLAdapter
 from utils.connection_manager import manager
@@ -403,6 +405,18 @@ class CalculationService(MySQLAdapter):
             )
         return self._price_redis
 
+    # 🔽🔽🔽 ADD THIS HELPER 🔽🔽🔽
+    async def send_redis_signal(self, retri_id, payload):
+        position_redis = await self.get_position_redis()
+        key = f"signals:{retri_id}"
+
+        logger.info(
+            "[redis-signal] retri_id=%s key=%s payload=%s",
+            retri_id, key, json.dumps(payload, ensure_ascii=False)
+        )
+
+        await position_redis.set(key, json.dumps(payload))
+
     async def close(self):
         logger.info("closing redis connection")
         if self._position_redis:
@@ -701,10 +715,11 @@ class CalculationService(MySQLAdapter):
                         ]
 
                         # 5. send socket message to inform liquidation
-                        await manager.notify_user(
-                            user_id,
-                            { "trigger" : "liquidation_cross", "pos": to_liquidate }
+                        await self.send_redis_signal(
+                            retri_id=user_id,
+                            payload={"trigger": "liquidation_cross", "pos": to_liquidate},
                         )
+
 
 
                     except Exception:
@@ -826,7 +841,8 @@ class CalculationService(MySQLAdapter):
 
         # Notify users
         for retri_id, message in pending_notifs:
-            await manager.notify_user(retri_id, message)
+            await self.send_redis_signal(retri_id, message)
+
         for user_id, retri_id in updated_users.items():
             await update_position_status_per_user(user_id, retri_id)
             await update_order_status_per_user(user_id, retri_id)
@@ -909,7 +925,8 @@ class CalculationService(MySQLAdapter):
                     break
 
         for retri_id, message in pending_notifs:
-            await manager.notify_user(retri_id, message)
+            await self.send_redis_signal(retri_id, message)
+
         for user_id, retri_id in updated_users.items():
             await update_position_status_per_user(user_id, retri_id)
             await update_order_status_per_user(user_id, retri_id)
@@ -1446,7 +1463,8 @@ class CalculationService(MySQLAdapter):
 
             conn.commit()
             for retri_id, message in pending_notifs:
-                await manager.notify_user(retri_id, message)
+                await self.send_redis_signal(retri_id, message)
+
             for user_id, retri_id in liquidated_users.items():
                 await update_position_status_per_user(user_id, retri_id)
                 await update_order_status_per_user(user_id, retri_id)

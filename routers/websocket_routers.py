@@ -185,97 +185,234 @@ async def liq_sender(websocket: WebSocket, user_id):
     except asyncio.CancelledError:
         logger.info(f"socket error: cannot send liquidation price of user {user_id}")
         return
-
+#
+#
+# @router.websocket("/{user_id}")
+# async def pnl_stream(websocket: WebSocket, user_id: str):
+#     await websocket.accept()
+#     logger.info(f"User {user_id} connected to PnL stream")
+#
+#     last_heartbeat = time.monotonic()
+#
+#     try:
+#         while True:
+#             # -----------------------------
+#             # 1) Redis에서 signal 확인
+#             # -----------------------------
+#             signal_key = f"signals:{user_id}"
+#             signal = await position_redis.get(signal_key)
+#
+#             if signal:
+#
+#                 # NEW: decode JSON if present
+#                 # try:
+#                 #     obj = json.loads(signal)
+#                 #     payload_signal = obj
+#                 # except (TypeError, json.JSONDecodeError):
+#                 #     # plain string -> wrap
+#                 #     payload_signal = {"trigger": signal}
+#
+#                 try:
+#                     await websocket.send_json({"trigger": signal})
+#                 except WebSocketDisconnect:
+#                     logger.info(f"Socket closed while sending signal to {user_id}")
+#                     break
+#                 except Exception:
+#                     logger.exception(f"Unexpected error while sending signal to {user_id}")
+#                     break
+#
+#                 # signal은 단발성 → 즉시 삭제
+#                 await position_redis.delete(signal_key)
+#
+#             # -----------------------------
+#             # 2) PnL 업데이트
+#             # -----------------------------
+#             pos_key = f"positions:{user_id}"
+#             positions = await position_redis.hgetall(pos_key)
+#
+#             updates = []
+#             available = 0.0
+#
+#             if positions:
+#                 for symbol, raw in positions.items():
+#                     try:
+#                         info = json.loads(raw)
+#
+#                         updates.append({
+#                             "pos_id": info["pos_id"],
+#                             "symbol": symbol,
+#                             "current_price": info.get("market_price"),
+#                             "liq_price": info.get("liq_price"),
+#                             "pnl": info.get("unrealized_pnl"),
+#                             "pnl_pct": info.get("unrealized_pnl_pct"),
+#                             "roi_pct": info.get("roi_pct"),
+#                         })
+#
+#                     except Exception as e:
+#                         logger.warning(f"Failed to parse position for user {user_id}: {e!r}")
+#                         continue
+#
+#             # -----------------------------
+#             # 3) Send payload or heartbeat
+#             # -----------------------------
+#             payload = None
+#
+#             if updates:
+#                 total_pnl = sum(item.get("pnl") or 0.0 for item in updates)
+#                 payload = {
+#                     "data": updates,
+#                     "total": total_pnl,
+#                     "avbl": available
+#                 }
+#             else:
+#                 # heartbeat
+#                 now = time.monotonic()
+#                 if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+#                     payload = {"type": "heartbeat"}
+#                     last_heartbeat = now
+#
+#             if payload:
+#                 try:
+#                     await websocket.send_json(payload)
+#                 except WebSocketDisconnect:
+#                     logger.info(f"Socket closed for user {user_id}")
+#                     break
+#                 except Exception:
+#                     logger.exception(f"Error sending update to {user_id}")
+#                     break
+#
+#             # -----------------------------
+#             # 4) loop interval
+#             # -----------------------------
+#             await asyncio.sleep(1.0)
+#
+#     except WebSocketDisconnect:
+#         logger.info(f"User {user_id} disconnected cleanly")
+#
+#     except Exception:
+#         logger.exception(f"Unexpected error in pnl_stream for user {user_id}")
 
 @router.websocket("/{user_id}")
 async def pnl_stream(websocket: WebSocket, user_id: str):
-    await manager.connect(user_id, websocket)
+    await websocket.accept()
     logger.info(f"User {user_id} connected to PnL stream")
-
-    # other_task = asyncio.create_task(liq_sender(websocket, user_id))
 
     last_heartbeat = time.monotonic()
 
     try:
         while True:
-            # 1) Read this user's positions (might be empty)
-            key       = f"positions:{user_id}"
-            positions = await position_redis.hgetall(key)
-            liq_key = f"liq_prices:{user_id}"
+            # -----------------------------
+            # 1) Check Redis signal for this user
+            #    Key: signals:{user_id}
+            #    Value: JSON string, e.g.
+            #      {"trigger": "limit", "order": {...}}
+            # -----------------------------
+            signal_key = f"signals:{user_id}"
+            signal_raw = await position_redis.get(signal_key)
 
-            updates = []
-            liq_list = []
-            available = 0.0
+            if signal_raw:
+                try:
+                    # Expecting a JSON object string from Redis
+                    signal_payload = json.loads(signal_raw)
 
-            # only compute updates if there are positions
-            if positions:
-                symbols    = list(positions.keys())
-                for symbol in symbols:
+                    # Safety: if it's not a dict, wrap it
+                    if not isinstance(signal_payload, dict):
+                        signal_payload = {"trigger": signal_payload}
+
+                except json.JSONDecodeError:
+                    # If it's not valid JSON, send as simple trigger
+                    signal_payload = {"trigger": signal_raw}
+
+                # Send the signal as-is to the WebSocket client
+                try:
+                    await websocket.send_json(signal_payload)
+                except WebSocketDisconnect:
+                    logger.info(f"Socket closed while sending signal to {user_id}")
+                    break
+                except Exception:
+                    logger.exception(f"Unexpected error while sending signal to {user_id}")
+                    break
+
+                # One-shot signal → delete after sending
+                await position_redis.delete(signal_key)
+
+            # -----------------------------
+            # 2) PnL updates from positions:{user_id}
+            # -----------------------------
+            pos_key = f"positions:{user_id}"
+            positions_raw = await position_redis.hgetall(pos_key)
+
+            updates: list[dict] = []
+
+            if positions_raw:
+                for symbol, raw in positions_raw.items():
                     try:
-                        info        = json.loads(positions[symbol])
+                        info = json.loads(raw)
 
-                        payload_data = {
+                        updates.append({
                             "pos_id": info["pos_id"],
                             "symbol": symbol,
                             "current_price": info.get("market_price"),
                             "liq_price": info.get("liq_price"),
                             "pnl": info.get("unrealized_pnl"),
-                            # "pnl_pct": info.get("roi_pct"),
                             "pnl_pct": info.get("unrealized_pnl_pct"),
-                            # "roi_pct": info.get("unrealized_pnl_pct"),
                             "roi_pct": info.get("roi_pct"),
-                        }
+                        })
 
-                        updates.append(payload_data)
-
-                    except KeyError as e:
-                        logger.warning(f"User {user_id} — missing key {e.args[0]} for symbol {symbol}, skipping")
+                    except Exception as e:
+                        logger.warning(f"Failed to parse position for user {user_id}: {e!r}")
                         continue
 
-                # liq_raw = await position_redis.get(liq_key)
-                # if liq_raw:
-                #     try:
-                #         liq_info = json.loads(liq_raw)
-                #         available = liq_info.get("available", 0.0)
-                #         positions_liq = liq_info.get("positions", [])
-                #         for pos in positions_liq:
-                #             liq_list.append({
-                #                 "pos_id": pos["pos_id"],
-                #                 "symbol": pos["symbol"],
-                #                 "liq_price": pos["liq_price"]
-                #             })
-                #     except Exception as e:
-                #         logger.warning(f"Failed to parse liquidation info for user {user_id}: {e!r}")
+            # -----------------------------
+            # 3) Available balance from Redis (set by liq_sender)
+            #    Key: availables:{user_id}
+            # -----------------------------
+            avl_key = f"availables:{user_id}"
+            try:
+                avl_raw = await position_redis.get(avl_key)
+                available = float(avl_raw) if avl_raw is not None else 0.0
+            except Exception:
+                logger.exception(f"Failed to read available balance for user {user_id}")
+                available = 0.0
 
-
-            # 2) Decide what to send
+            # -----------------------------
+            # 4) Build payload or heartbeat
+            # -----------------------------
             payload = None
+
             if updates:
-                total_pnl = sum(item.get("pnl") or 0.0 for item in updates)
-                payload   = {
+                total_pnl = sum((item.get("pnl") or 0.0) for item in updates)
+                payload = {
                     "data": updates,
-                    # "liq": liq_list,
                     "total": total_pnl,
                     "avbl": available
                 }
             else:
+                # heartbeat only when there is no data
                 now = time.monotonic()
                 if now - last_heartbeat >= HEARTBEAT_INTERVAL:
-                    payload         = {"type": "heartbeat"}
-                    last_heartbeat  = now
+                    payload = {"type": "heartbeat"}
+                    last_heartbeat = now
 
-            # 3) Send if there’s something to send
-            if payload:
+            # -----------------------------
+            # 5) Send payload if any
+            # -----------------------------
+            if payload is not None:
                 try:
                     await websocket.send_json(payload)
-                except (WebSocketDisconnect, RuntimeError):
-                    logger.info(f"Socket closed for user {user_id}, stopping loop")
+                except WebSocketDisconnect:
+                    logger.info(f"Socket closed for user {user_id}")
+                    break
+                except Exception:
+                    logger.exception(f"Error sending update to {user_id}")
                     break
 
-            # 4) Wait before the next tick
+            # -----------------------------
+            # 6) loop interval
+            # -----------------------------
             await asyncio.sleep(1.0)
 
     except WebSocketDisconnect:
         logger.info(f"User {user_id} disconnected cleanly")
-    finally:
-        manager.disconnect(user_id, websocket)
+    except Exception:
+        logger.exception(f"Unexpected error in pnl_stream for user {user_id}")

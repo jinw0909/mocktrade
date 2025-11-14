@@ -672,7 +672,7 @@ async def update_liq_price():
                 if pos_id is None or liq_price is None:
                     continue
 
-                logger.info(f"Updating liquidation price for pos_id={pos_id} with liq_price={liq_price}")
+                # logger.info(f"Updating liquidation price for pos_id={pos_id} with liq_price={liq_price}")
                 # Wrap each position update in a savepoint so one bad row won't kill the batch
                 cursor.execute("SAVEPOINT liq_updt")
                 try:
