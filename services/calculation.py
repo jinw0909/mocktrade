@@ -492,9 +492,275 @@ class CalculationService(MySQLAdapter):
 
             await pipe.execute()
 
+    # async def calculate_liq_prices(self):
+    #     # logger.info("Starting global liquidation price calculation")
+    #
+    #     position_redis = await self.get_position_redis()
+    #     price_redis = await self.get_price_redis()
+    #
+    #     async for pos_key in position_redis.scan_iter("positions:*"):
+    #         try:
+    #             _, user_id = pos_key.split(":")
+    #             raw_pos = await position_redis.hgetall(pos_key)
+    #             positions = [json.loads(p) for p in raw_pos.values()]
+    #             if not positions:
+    #                 # liq_key = f"liq_prices:{user_id}"
+    #                 # await position_redis.delete(liq_key)
+    #                 continue
+    #
+    #             # load balance and orders
+    #             bal_key = f"balances:{user_id}"
+    #             ord_key = f"orders:{user_id}"
+    #             avl_key = f"availables:{user_id}"
+    #             liq_key = f"liq_prices:{user_id}"
+    #
+    #             balance = float(await position_redis.get(bal_key) or 0)
+    #             raw_ord = await position_redis.get(ord_key) or "[]"
+    #             orders = json.loads(raw_ord)
+    #
+    #             iso_pos = sum(p["margin"] for p in positions if p["margin_type"] == "isolated")
+    #             iso_ord = sum(o["margin"] for o in orders if o["margin_type"] == "isolated" and o["type"] in ("limit", "market"))
+    #             cross_equity = balance - iso_pos - iso_ord
+    #
+    #             total_pos = sum(p["margin"] for p in positions)
+    #             total_ord = sum(o["margin"] for o in orders)
+    #             total_upnl = sum(p.get("unrealized_pnl", 0.0) for p in positions if p["margin_type"] == "cross")
+    #             available = balance - total_pos - total_ord + total_upnl
+    #             await position_redis.set(avl_key, available)
+    #
+    #             cross = [p for p in positions if p["margin_type"] == "cross"]
+    #
+    #             # 1) ensure each leg has a market_price
+    #             valid_cross = []
+    #             for p in cross:
+    #                 redis_key = f"price:{p['symbol']}USDT"
+    #                 raw = await price_redis.get(redis_key)
+    #
+    #                 if raw is None:
+    #                     logger.warning(
+    #                         f"No fresh price for {p['symbol']}, skipping liquidation check for pos_id={p['pos_id']}"
+    #                     )
+    #                     continue
+    #
+    #                 try:
+    #                     p["market_price"] = float(raw)
+    #                 except ValueError:
+    #                     logger.error(
+    #                         f"Invalid price for {p['symbol']} ({raw!r}), skipping pos_id={p['pos_id']}"
+    #                     )
+    #                     continue
+    #
+    #
+    #                 valid_cross.append(p)
+    #                 # mp = p.get("market_price")
+    #                 # if mp is None:
+    #                 #     raw = await price_redis.get(f"price:{p['symbol']}USDT")
+    #                 #     mp = float(raw) if raw else p["entry_price"]
+    #                 # p["market_price"] = mp
+    #
+    #             if len(valid_cross) != len(cross):
+    #                 logger.warning(
+    #                     f"Skipping user {user_id}: missing prices for symbols"
+    #                 )
+    #                 continue
+    #
+    #             cross = valid_cross
+    #
+    #             # 2) precompute other‐legs TMM & UPNL
+    #             other_tmm = {
+    #                 p["pos_id"]: sum(
+    #                     MAINTENANCE_RATE * q["market_price"] * q["amount"]
+    #                     for q in cross
+    #                     if q["pos_id"] != p["pos_id"]
+    #                 )
+    #                 for p in cross
+    #             }
+    #             other_upnl = {
+    #                 p["pos_id"]: sum(
+    #                     q.get("unrealized_pnl", 0.0)
+    #                     for q in cross
+    #                     if q["pos_id"] != p["pos_id"]
+    #                 )
+    #                 for p in cross
+    #             }
+    #
+    #             liq_prices = []
+    #             breaches   = []
+    #
+    #             for p in cross:
+    #
+    #                 pid    = p["pos_id"]
+    #                 E      = p["entry_price"]
+    #                 S      = p["amount"]
+    #                 MP     = p["market_price"]
+    #                 side   = 1 if p["side"] == "buy" else -1
+    #
+    #                 # maintenance amount of THIS leg at mark
+    #                 cumB   = MAINTENANCE_RATE * E * S
+    #                 # notional of THIS leg (signed)
+    #                 notional = side * S * E
+    #
+    #                 # numerator & denominator of Binance’s multi‐leg formula
+    #                 num = (
+    #                         cross_equity
+    #                         - other_tmm[pid]
+    #                         + other_upnl[pid]
+    #                         + cumB
+    #                         - notional
+    #                 )
+    #                 den = S * MAINTENANCE_RATE - side * S
+    #
+    #                 # -- FIX: skip if denominator is zero --
+    #                 if den == 0:
+    #                     logger.warning(f"Denominator zero for pos_id={pid}, skipping liquidation calc")
+    #                     continue
+    #
+    #                 # compute the raw liquidation price
+    #                 raw_lp = num / den
+    #
+    #                 # ── Side‑aware handling of non‑positive LP ──
+    #                 if side == -1 and raw_lp <= 0:
+    #                     # short leg whose LP would be ≤0 → skip it entirely
+    #                     logger.info(f"Short pos_id={pid} has non‑positive LP ({raw_lp:.2f}), skipping")
+    #                     continue
+    #
+    #                 if side == 1 and raw_lp <= 0:
+    #                     # long leg whose LP is ≤0 → clamp to zero
+    #                     lp = 0.0
+    #                 else:
+    #                     lp = raw_lp
+    #
+    #                 # # final liquidation price
+    #                 # lp = num / den if den != 0 else 0.0
+    #                 # lp = max(lp, 0.0)
+    #
+    #                 # now lp is guaranteed > 0
+    #                 liq_prices.append({
+    #                     "pos_id": pid,
+    #                     "symbol": p["symbol"],
+    #                     "liq_price": lp
+    #                 })
+    #
+    #                 if MP is not None:
+    #                     if (side == 1 and MP <= lp) or (side == -1 and MP >= lp):
+    #                         breaches.append({
+    #                             "pos_id": pid,
+    #                             "symbol": p["symbol"],
+    #                             "liq_price": lp,
+    #                             "current": MP,
+    #                             "pnl": p.get("unrealized_pnl", 0.0)
+    #                         })
+    #
+    #             to_liquidate = min(breaches, key=lambda b: b["pnl"]) if breaches else None
+    #
+    #             if to_liquidate:
+    #                 pnl_liq = to_liquidate["pnl"]
+    #                 new_balance = max(balance + pnl_liq, 0.0)
+    #
+    #                 conn = None
+    #                 cursor = None
+    #                 try:
+    #                     conn = self._get_connection()
+    #                     conn.autocommit(False)
+    #                     cursor = conn.cursor()
+    #
+    #                     # 1. Update user's balance
+    #                     cursor.execute("""
+    #                         UPDATE mocktrade.user
+    #                            SET balance = GREATEST(balance + %s, 0)
+    #                          WHERE retri_id = %s
+    #                     """, (pnl_liq, user_id))
+    #
+    #                     # 2. Get user ID from retri_id
+    #                     cursor.execute("""
+    #                         SELECT `id` FROM mocktrade.user
+    #                          WHERE retri_id = %s AND status = 0
+    #                     """, (user_id,))
+    #                     row = cursor.fetchone()
+    #                     if not row:
+    #                         logger.warning(f"User not found with retri_id={user_id}")
+    #                         continue
+    #
+    #                     uid = row['id']
+    #
+    #                     # 3. Mark the latest active position as liquidated
+    #                     cursor.execute("""
+    #                         UPDATE mocktrade.position_history
+    #                            SET status = 3,
+    #                                pnl = %s,
+    #                                datetime = %s,
+    #                                close_price = %s
+    #                          WHERE symbol = %s
+    #                            AND user_id = %s
+    #                            AND status = 1
+    #                          ORDER BY id DESC
+    #                          LIMIT 1
+    #                     """, (
+    #                         pnl_liq,
+    #                         datetime.now(timezone("Asia/Seoul")),
+    #                         to_liquidate["current"],
+    #                         to_liquidate["symbol"],
+    #                         uid
+    #                     ))
+    #
+    #                     conn.commit()
+    #
+    #                     # 4. Delete liquidated Redis position
+    #                     await position_redis.hdel(pos_key, to_liquidate["symbol"])
+    #                     await position_redis.set(bal_key, new_balance)
+    #
+    #                     liq_prices = [
+    #                         p for p in liq_prices
+    #                         if p["pos_id"] != to_liquidate["pos_id"]
+    #                     ]
+    #
+    #                     # 5. send socket message to inform liquidation
+    #                     await self.send_redis_signal(
+    #                         retri_id=user_id,
+    #                         payload={"trigger": "liquidation_cross", "pos": to_liquidate},
+    #                     )
+    #
+    #
+    #
+    #                 except Exception:
+    #                     conn.rollback()
+    #                     logger.exception(f"Failed persisting liquidation for retri_id={user_id}")
+    #                 finally:
+    #                     if cursor:
+    #                         cursor.close()
+    #                     if conn:
+    #                         conn.close()
+    #
+    #             for lp_item in liq_prices:
+    #                 symbol = lp_item["symbol"]
+    #                 new_lp = lp_item["liq_price"]
+    #                 # read the existing JSON blob for this symbol
+    #                 blob = await position_redis.hget(pos_key, symbol)
+    #                 if not blob:
+    #                     # unexpected but skip if missing
+    #                     continue
+    #
+    #                 data = json.loads(blob)
+    #                 # only overwrite cross-margin positions (isolated ones are untouched)
+    #                 if data.get("margin_type") == "cross":
+    #                     data["liq_price"] = new_lp
+    #                     # write back the updated JSON
+    #                     await position_redis.hset(pos_key, symbol, json.dumps(data))
+    #
+    #             # if liq_prices:
+    #             #     await position_redis.set(
+    #             #         liq_key,
+    #             #         json.dumps({"positions": liq_prices})
+    #             #     )
+    #             # else:
+    #             #     await position_redis.delete(liq_key)
+    #
+    #         except Exception:
+    #             logger.exception(f"Failed calculating liq prices for user")
+    #             continue
+
     async def calculate_liq_prices(self):
         # logger.info("Starting global liquidation price calculation")
-
         position_redis = await self.get_position_redis()
         price_redis = await self.get_price_redis()
 
@@ -519,27 +785,40 @@ class CalculationService(MySQLAdapter):
                 orders = json.loads(raw_ord)
 
                 iso_pos = sum(p["margin"] for p in positions if p["margin_type"] == "isolated")
-                iso_ord = sum(o["margin"] for o in orders if o["margin_type"] == "isolated" and o["type"] in ("limit", "market"))
+                iso_ord = sum(
+                    o["margin"]
+                    for o in orders
+                    if o["margin_type"] == "isolated" and o["type"] in ("limit", "market")
+                )
                 cross_equity = balance - iso_pos - iso_ord
 
                 total_pos = sum(p["margin"] for p in positions)
                 total_ord = sum(o["margin"] for o in orders)
-                total_upnl = sum(p.get("unrealized_pnl", 0.0) for p in positions if p["margin_type"] == "cross")
+                total_upnl = sum(
+                    p.get("unrealized_pnl", 0.0)
+                    for p in positions
+                    if p["margin_type"] == "cross"
+                )
                 available = balance - total_pos - total_ord + total_upnl
                 await position_redis.set(avl_key, available)
 
                 cross = [p for p in positions if p["margin_type"] == "cross"]
 
-                # 1) ensure each leg has a market_price
+                # --------------------------------------------------------------
+                # CHANGED: track positions with missing price for force-close
+                # --------------------------------------------------------------
+                missing_price = []
                 valid_cross = []
+
                 for p in cross:
                     redis_key = f"price:{p['symbol']}USDT"
                     raw = await price_redis.get(redis_key)
 
                     if raw is None:
                         logger.warning(
-                            f"No fresh price for {p['symbol']}, skipping liquidation check for pos_id={p['pos_id']}"
+                            f"No fresh price for {p['symbol']}, force-closing pos_id={p['pos_id']}"
                         )
+                        missing_price.append(p)  # NEW: handle these later
                         continue
 
                     try:
@@ -548,23 +827,103 @@ class CalculationService(MySQLAdapter):
                         logger.error(
                             f"Invalid price for {p['symbol']} ({raw!r}), skipping pos_id={p['pos_id']}"
                         )
+                        missing_price.append(p)  # treat invalid price same as missing
                         continue
 
-
                     valid_cross.append(p)
-                    # mp = p.get("market_price")
-                    # if mp is None:
-                    #     raw = await price_redis.get(f"price:{p['symbol']}USDT")
-                    #     mp = float(raw) if raw else p["entry_price"]
-                    # p["market_price"] = mp
 
-                if len(valid_cross) != len(cross):
-                    logger.warning(
-                        f"Skipping user {user_id}: missing prices for symbols"
-                    )
-                    continue
+                # --------------------------------------------------------------
+                # NEW: force-close positions whose price is missing/invalid
+                #       - refund margin to balance
+                #       - close latest active position_history with status=3, pnl=0
+                #       - remove from Redis positions
+                # --------------------------------------------------------------
+                if missing_price:
+                    conn = None
+                    cursor = None
+                    try:
+                        conn = self._get_connection()
+                        conn.autocommit(False)
+                        cursor = conn.cursor()
 
+                        # find internal user id once
+                        cursor.execute("""
+                                       SELECT `id` FROM mocktrade.user
+                                       WHERE retri_id = %s AND status = 0
+                                       """, (user_id,))
+                        row = cursor.fetchone()
+                        if not row:
+                            logger.warning(
+                                f"User not found with retri_id={user_id} while force-closing no-price positions"
+                            )
+                        else:
+                            uid = row["id"]
+                            now_kr = datetime.now(timezone("Asia/Seoul"))
+
+                            for mp in missing_price:
+                                margin = mp["margin"]
+                                symbol = mp["symbol"]
+                                entry_price = mp["entry_price"]
+
+                                # 1) refund margin to user balance (DB)
+                                cursor.execute("""
+                                               UPDATE mocktrade.user
+                                               SET balance = GREATEST(balance + %s, 0)
+                                               WHERE retri_id = %s
+                                               """, (margin, user_id))
+
+                                # 2) mark latest active position as closed with pnl=0
+                                cursor.execute("""
+                                               UPDATE mocktrade.position_history
+                                               SET status = 3,
+                                                   pnl = 0,
+                                                   close_price = %s,
+                                                   datetime = %s
+                                               WHERE symbol = %s
+                                                 AND user_id = %s
+                                                 AND status = 1
+                                               ORDER BY id DESC
+                                               LIMIT 1
+                                               """, (entry_price, now_kr, symbol, uid))
+
+                                # 3) remove from Redis & update Redis balance
+                                await position_redis.hdel(pos_key, symbol)
+                                balance += margin  # keep local balance in sync
+                                await position_redis.set(bal_key, balance)
+
+                        conn.commit()
+
+                    except Exception:
+                        if conn:
+                            conn.rollback()
+                        logger.exception(
+                            f"Failed force-closing no-price positions for retri_id={user_id}"
+                        )
+                    finally:
+                        if cursor:
+                            cursor.close()
+                        if conn:
+                            conn.close()
+
+                    # NEW: update aggregates after closing these positions
+                    closed_margin = sum(mp["margin"] for mp in missing_price)
+                    closed_upnl = sum(mp.get("unrealized_pnl", 0.0) for mp in missing_price)
+
+                    total_pos -= closed_margin
+                    total_upnl -= closed_upnl
+                    cross_equity = balance - iso_pos - iso_ord
+                    available = balance - total_pos - total_ord + total_upnl
+                    await position_redis.set(avl_key, available)
+
+                # Only keep positions that still have a valid price
                 cross = valid_cross
+
+                # If everything was closed, nothing more to do for this user
+                if not cross:
+                    continue
+                # --------------------------------------------------------------
+                # END of missing-price handling
+                # --------------------------------------------------------------
 
                 # 2) precompute other‐legs TMM & UPNL
                 other_tmm = {
@@ -585,18 +944,17 @@ class CalculationService(MySQLAdapter):
                 }
 
                 liq_prices = []
-                breaches   = []
+                breaches = []
 
                 for p in cross:
-
-                    pid    = p["pos_id"]
-                    E      = p["entry_price"]
-                    S      = p["amount"]
-                    MP     = p["market_price"]
-                    side   = 1 if p["side"] == "buy" else -1
+                    pid = p["pos_id"]
+                    E = p["entry_price"]
+                    S = p["amount"]
+                    MP = p["market_price"]
+                    side = 1 if p["side"] == "buy" else -1
 
                     # maintenance amount of THIS leg at mark
-                    cumB   = MAINTENANCE_RATE * E * S
+                    cumB = MAINTENANCE_RATE * E * S
                     # notional of THIS leg (signed)
                     notional = side * S * E
 
@@ -610,18 +968,22 @@ class CalculationService(MySQLAdapter):
                     )
                     den = S * MAINTENANCE_RATE - side * S
 
-                    # -- FIX: skip if denominator is zero --
+                    # -- FIX (already in your code): skip if denominator is zero --
                     if den == 0:
-                        logger.warning(f"Denominator zero for pos_id={pid}, skipping liquidation calc")
+                        logger.warning(
+                            f"Denominator zero for pos_id={pid}, skipping liquidation calc"
+                        )
                         continue
 
                     # compute the raw liquidation price
                     raw_lp = num / den
 
-                    # ── Side‑aware handling of non‑positive LP ──
+                    # ── Side-aware handling of non-positive LP ──
                     if side == -1 and raw_lp <= 0:
                         # short leg whose LP would be ≤0 → skip it entirely
-                        logger.info(f"Short pos_id={pid} has non‑positive LP ({raw_lp:.2f}), skipping")
+                        logger.info(
+                            f"Short pos_id={pid} has non-positive LP ({raw_lp:.2f}), skipping"
+                        )
                         continue
 
                     if side == 1 and raw_lp <= 0:
@@ -630,26 +992,25 @@ class CalculationService(MySQLAdapter):
                     else:
                         lp = raw_lp
 
-                    # # final liquidation price
-                    # lp = num / den if den != 0 else 0.0
-                    # lp = max(lp, 0.0)
-
-                    # now lp is guaranteed > 0
-                    liq_prices.append({
-                        "pos_id": pid,
-                        "symbol": p["symbol"],
-                        "liq_price": lp
-                    })
+                    liq_prices.append(
+                        {
+                            "pos_id": pid,
+                            "symbol": p["symbol"],
+                            "liq_price": lp,
+                        }
+                    )
 
                     if MP is not None:
                         if (side == 1 and MP <= lp) or (side == -1 and MP >= lp):
-                            breaches.append({
-                                "pos_id": pid,
-                                "symbol": p["symbol"],
-                                "liq_price": lp,
-                                "current": MP,
-                                "pnl": p.get("unrealized_pnl", 0.0)
-                            })
+                            breaches.append(
+                                {
+                                    "pos_id": pid,
+                                    "symbol": p["symbol"],
+                                    "liq_price": lp,
+                                    "current": MP,
+                                    "pnl": p.get("unrealized_pnl", 0.0),
+                                }
+                            )
 
                 to_liquidate = min(breaches, key=lambda b: b["pnl"]) if breaches else None
 
@@ -665,43 +1026,53 @@ class CalculationService(MySQLAdapter):
                         cursor = conn.cursor()
 
                         # 1. Update user's balance
-                        cursor.execute("""
+                        cursor.execute(
+                            """
                             UPDATE mocktrade.user
-                               SET balance = GREATEST(balance + %s, 0)
-                             WHERE retri_id = %s
-                        """, (pnl_liq, user_id))
+                            SET balance = GREATEST(balance + %s, 0)
+                            WHERE retri_id = %s
+                            """,
+                            (pnl_liq, user_id),
+                        )
 
                         # 2. Get user ID from retri_id
-                        cursor.execute("""
+                        cursor.execute(
+                            """
                             SELECT `id` FROM mocktrade.user
-                             WHERE retri_id = %s AND status = 0
-                        """, (user_id,))
+                            WHERE retri_id = %s AND status = 0
+                            """,
+                            (user_id,),
+                        )
                         row = cursor.fetchone()
                         if not row:
                             logger.warning(f"User not found with retri_id={user_id}")
+                            # NOTE: continuing will skip commit, but balance UPDATE already ran
                             continue
 
-                        uid = row['id']
+                        uid = row["id"]
 
                         # 3. Mark the latest active position as liquidated
-                        cursor.execute("""
+                        cursor.execute(
+                            """
                             UPDATE mocktrade.position_history
-                               SET status = 3,
-                                   pnl = %s,
-                                   datetime = %s,
-                                   close_price = %s
-                             WHERE symbol = %s
-                               AND user_id = %s
-                               AND status = 1
-                             ORDER BY id DESC
-                             LIMIT 1
-                        """, (
-                            pnl_liq,
-                            datetime.now(timezone("Asia/Seoul")),
-                            to_liquidate["current"],
-                            to_liquidate["symbol"],
-                            uid
-                        ))
+                            SET status = 3,
+                                pnl = %s,
+                                datetime = %s,
+                                close_price = %s
+                            WHERE symbol = %s
+                              AND user_id = %s
+                              AND status = 1
+                            ORDER BY id DESC
+                            LIMIT 1
+                            """,
+                            (
+                                pnl_liq,
+                                datetime.now(timezone("Asia/Seoul")),
+                                to_liquidate["current"],
+                                to_liquidate["symbol"],
+                                uid,
+                            ),
+                        )
 
                         conn.commit()
 
@@ -710,21 +1081,26 @@ class CalculationService(MySQLAdapter):
                         await position_redis.set(bal_key, new_balance)
 
                         liq_prices = [
-                            p for p in liq_prices
+                            p
+                            for p in liq_prices
                             if p["pos_id"] != to_liquidate["pos_id"]
                         ]
 
                         # 5. send socket message to inform liquidation
                         await self.send_redis_signal(
                             retri_id=user_id,
-                            payload={"trigger": "liquidation_cross", "pos": to_liquidate},
+                            payload={
+                                "trigger": "liquidation_cross",
+                                "pos": to_liquidate,
+                            },
                         )
 
-
-
                     except Exception:
-                        conn.rollback()
-                        logger.exception(f"Failed persisting liquidation for retri_id={user_id}")
+                        if conn:
+                            conn.rollback()
+                        logger.exception(
+                            f"Failed persisting liquidation for retri_id={user_id}"
+                        )
                     finally:
                         if cursor:
                             cursor.close()
@@ -756,8 +1132,9 @@ class CalculationService(MySQLAdapter):
                 #     await position_redis.delete(liq_key)
 
             except Exception:
-                logger.exception(f"Failed calculating liq prices for user")
+                logger.exception("Failed calculating liq prices for user")
                 continue
+
 
     async def settle_orders(self):
         logger.info(f"executing settle orders at {datetime.now(timezone('Asia/Seoul'))}")
