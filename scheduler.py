@@ -59,7 +59,11 @@ calculation = CalculationService()
 # realtime = RealtimeService()
 svc = SettingsService()
 
-session = boto3.Session()  # will honor env vars & ~/.aws/credentials
+session = boto3.Session(
+    aws_access_key_id=config.get("S3_KEY", default=None),
+    aws_secret_access_key=config.get("S3_PASSWORD", default=None),
+    region_name=config.get("S3_REGION", default=None),
+)  # will honor env vars & ~/.aws/credentials
 sts = session.client("sts")
 print("CallerIdentity:", sts.get_caller_identity())
 
@@ -71,184 +75,18 @@ bucket = "mocktrade-dumps"
 key = "local/mysqldump_202508291103.sql.gz"
 
 s3 = boto3.client("s3")
-try:
-    head = s3.head_object(Bucket=bucket, Key=key)
-    print("FOUND:", head["ContentLength"], "bytes")
-except botocore.exceptions.ClientError as e:
-    print("HEAD failed:", e.response["Error"]["Code"], e.response["Error"].get("Message"))
+# try:
+#     head = s3.head_object(Bucket=bucket, Key=key)
+#     print("FOUND:", head["ContentLength"], "bytes")
+# except botocore.exceptions.ClientError as e:
+#    print("HEAD failed:", e.response["Error"]["Code"], e.response["Error"].get("Message"))
+
+
 
 
 
 BASE_DIR = Path(__file__).resolve().parent
 BACKUP_DIR = Path(config.get("MYSQL_BACKUP_DIR", default="./backups/mysql")).expanduser()
-
-async def daily_mysql_dump_simple():
-    """
-    Stream mysqldump -> gzip file. Creds from env via `config`.
-    """
-    try:
-        # Work with a local variable
-        backup_dir = BACKUP_DIR
-        if not backup_dir.is_absolute():
-            backup_dir = (BASE_DIR / backup_dir).resolve()
-
-        backup_dir.mkdir(parents=True, exist_ok=True)
-
-        date_str = datetime.now(TZ).strftime("%Y%m%d%H%M")
-        out_file = backup_dir / f"mysqldump_{date_str}.sql.gz"
-
-        dump_cmd = [
-            "mysqldump",
-            f"--host={config.get('HOST')}",
-            f"--user={config.get('USER1')}",
-            f"--password={config.get('PASS')}",   # '=' prevents interactive prompt
-            "--default-character-set=utf8mb4",
-            "--single-transaction",
-            "--quick",
-            "--routines", "--triggers", "--events",
-            "--set-gtid-purged=OFF",
-            config.get("DBNAME"),
-        ]
-
-        logger.info(f"[dump] starting mysqldump for DB={config.get('DBNAME')} -> {out_file}")
-
-        p_dump = await asyncio.create_subprocess_exec(
-            *dump_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-
-        # Drain stderr concurrently while streaming stdout -> gzip
-        stderr_task = asyncio.create_task(p_dump.stderr.read())
-
-        with gzip.open(out_file, "wb") as gz:
-            while True:
-                chunk = await p_dump.stdout.read(1024 * 1024)  # 1MB
-                if not chunk:
-                    break
-                gz.write(chunk)
-
-        # Wait for process to finish and collect stderr
-        returncode = await p_dump.wait()
-        dump_err = await stderr_task
-
-        if returncode != 0:
-            out_file.unlink(missing_ok=True)
-            raise RuntimeError(f"[dump] mysqldump failed ({returncode}): {dump_err.decode(errors='ignore')}")
-
-        logger.info(f"[dump] wrote {out_file} ({out_file.stat().st_size/1024/1024:.2f} MB)")
-
-        # Retention policy
-        cutoff = datetime.now(TZ) - timedelta(days=30)
-        removed = 0
-        for f in backup_dir.glob("mysqldump_*.sql.gz"):
-            try:
-                mtime = datetime.fromtimestamp(f.stat().st_mtime, TZ)
-                if mtime < cutoff:
-                    f.unlink(missing_ok=True)
-                    removed += 1
-            except Exception as e:
-                logger.warning(f"[dump] failed to remove {f}: {e}")
-
-        if removed:
-            logger.info(f"[dump] removed {removed} old backups")
-
-    except Exception:
-        logger.exception("daily_mysql_dump_simple failed")
-
-# async def daily_mysql_dump_s3():
-#     tmp_path = None
-#     try:
-#         # ---- config
-#         date_str = datetime.now(TZ).strftime("%Y%m%d%H%M")
-#         bucket   = config.get("S3_BUCKET", default="your-bucket-name")
-#         prefix   = config.get("S3_PREFIX", default="db-backups/mocktrade").strip().strip("/")
-#         s3_key   = f"{prefix}/mysqldump_{date_str}.sql.gz"
-#
-#         mysqldump = shutil.which(config.get("MYSQLDUMP_BIN", default="mysqldump")) or "mysqldump"
-#         aws_bin   = shutil.which("aws") or "/usr/bin/aws"  # adjust for macOS: /opt/homebrew/bin/aws
-#
-#         if not shutil.which(mysqldump):
-#             raise RuntimeError(f"mysqldump not found at {mysqldump}")
-#         if not shutil.which(aws_bin):
-#             raise RuntimeError(f"AWS CLI not found at {aws_bin}")
-#
-#         dump_cmd = [
-#             mysqldump,
-#             f"--host={config.get('HOST')}",
-#             f"--user={config.get('USER1')}",
-#             f"--password={config.get('PASS')}",
-#             "--default-character-set=utf8mb4",
-#             "--single-transaction", "--quick",
-#             "--routines", "--triggers", "--events",
-#             "--set-gtid-purged=OFF",
-#             config.get("DBNAME"),
-#         ]
-#         logger.info(f"[dump] starting mysqldump for DB={config.get('DBNAME')} -> s3://{bucket}/{s3_key}")
-#
-#         # ---- run mysqldump
-#         p_dump = await asyncio.create_subprocess_exec(
-#             *dump_cmd,
-#             stdout=asyncio.subprocess.PIPE,
-#             stderr=asyncio.subprocess.PIPE,
-#         )
-#
-#         # drain stderr concurrently to avoid buffer buildup
-#         async def _drain_stderr(proc):
-#             return await proc.stderr.read()
-#         stderr_task = asyncio.create_task(_drain_stderr(p_dump))
-#
-#         # ---- write gzip to a temp file
-#         with tempfile.NamedTemporaryFile(delete=False, suffix=".sql.gz") as tmp:
-#             tmp_path = Path(tmp.name)  # remember path, close handle immediately
-#         bytes_written = 0
-#         # compresslevel=6 is a good default (speed/size)
-#         with gzip.open(tmp_path, "wb", compresslevel=6) as gz:
-#             while True:
-#                 chunk = await p_dump.stdout.read(1024 * 1024)  # 1MB
-#                 if not chunk:
-#                     break
-#                 gz.write(chunk)
-#                 bytes_written += len(chunk)
-#
-#         # ensure dump finished
-#         rc = await p_dump.wait()
-#         dump_err = await stderr_task
-#         if rc != 0:
-#             raise RuntimeError(f"mysqldump failed ({rc}): {dump_err.decode(errors='ignore')}")
-#
-#         size_mb = os.path.getsize(tmp_path) / (1024 * 1024)
-#         logger.info(f"[dump] temp gzip written: {tmp_path} ({size_mb:.2f} MB uncompressed_in≈{bytes_written/1024/1024:.2f} MB)")
-#
-#         # ---- upload to S3
-#         aws_cmd = [
-#             aws_bin, "s3", "cp", str(tmp_path), f"s3://{bucket}/{s3_key}",
-#             "--content-type", "application/gzip",
-#             "--storage-class", config.get("S3_STORAGE_CLASS", default="STANDARD_IA"),
-#             "--sse", config.get("S3_SSE", default="AES256"),
-#             "--no-progress",
-#         ]
-#         p_aws = await asyncio.create_subprocess_exec(
-#             *aws_cmd,
-#             stdout=asyncio.subprocess.PIPE,
-#             stderr=asyncio.subprocess.PIPE,
-#         )
-#         out, err = await p_aws.communicate()
-#         if p_aws.returncode != 0:
-#             raise RuntimeError(f"aws s3 cp failed ({p_aws.returncode}): {err.decode(errors='ignore')}")
-#
-#         logger.info(f"[dump] uploaded to s3://{bucket}/{s3_key}")
-#
-#     except Exception:
-#         logger.exception("daily_mysql_dump_s3 failed")
-#     finally:
-#         # always remove the temp file
-#         try:
-#             if tmp_path and tmp_path.exists():
-#                 tmp_path.unlink()
-#                 logger.info(f"[dump] temp file removed: {tmp_path}")
-#         except Exception as e:
-#             logger.warning(f"[dump] failed to remove temp file {tmp_path}: {e}")
 
 async def daily_mysql_dump_s3():
     tmp_path = None
@@ -317,7 +155,12 @@ async def daily_mysql_dump_s3():
             # Optionally set region if you want to force it:
             # region_name=config.get("AWS_REGION", default=None),
         )
-        s3 = boto3.client("s3", config=boto_cfg)
+        s3 = boto3.client(
+            "s3",
+            aws_access_key_id=config.get("S3_KEY", default=None),
+            aws_secret_access_key=config.get("S3_PASSWORD", default=None),
+            config=boto_cfg
+        )
 
         # multipart transfer config (tune thresholds if needed)
         transfer_cfg = TransferConfig(
