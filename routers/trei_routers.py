@@ -44,7 +44,7 @@ async def api_select(user_no: str, symbol: str, margin_type: int, leverage: int,
     check = MakeErrorType()
     try:
         data=mysql.get_check_user(user_no)
-        # print('asdasdsadas',data)
+        print('asdasdsadas',data)
         if len(data)>0  :
           
             user_id=data['id'].iloc[0]
