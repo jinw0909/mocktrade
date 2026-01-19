@@ -27,3 +27,4 @@ logs/
 
 # OS generated
 Thumbs.db
+dump.rdb

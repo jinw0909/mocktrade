@@ -319,6 +319,7 @@ async def update_order_status_per_user(user_id, retri_id):
                  WHERE `id` = %s
                    AND `status` = 0 
             """, (user_id, ))
+
             row = cursor.fetchone()
             if not row:
                 logger.warning(f"user {user_id} not found")
@@ -491,6 +492,7 @@ async def update_liq_price():
                         SET `liq_price` = %s
                         WHERE `id` = %s 
                     """, (liq_price, pos_id))
+
 
                     row_count += 1
 
