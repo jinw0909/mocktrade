@@ -152,7 +152,7 @@ async def api_select(user_no: str, symbol: str, margin_type: int, leverage: int,
     
     """
 
-   
+
     """
     mysql=MySQLAdapter()
     check = MakeErrorType()
