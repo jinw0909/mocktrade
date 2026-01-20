@@ -55,7 +55,12 @@ async def lifespan(app: FastAPI):
 
 
 import os
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    lifespan=lifespan,
+    root_path="/okx",
+    docs_url="/docs",
+    openapi_url="/openapi.json",
+)
 
 app.add_middleware(
     CORSMiddleware,
