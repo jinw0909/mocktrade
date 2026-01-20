@@ -44,7 +44,8 @@ logger = logging.getLogger(__name__)
 logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
 
 # 락 관련 전역 변수들 추가
-_LOCK_PATH = "/tmp/mocktrade_scheduler.lock"  # 앱 전용 락 파일 경로
+# _LOCK_PATH = "/tmp/mocktrade_scheduler.lock"  # 앱 전용 락 파일 경로
+_LOCK_PATH = config.get("SCHEDULER_LOCK_PATH", default="/tmp/mocktrade_scheduler.lock");
 _lock_fd = None
 _scheduler_started = False
 
@@ -58,7 +59,9 @@ SYMBOL_TO_COINGECKO_ID = {
     "ETH": "ethereum",
     "XRP": "ripple",
 }
+
 # mysql = MySQLAdapter()
+trader = TradingService()
 trader = TradingService()
 calculation = CalculationService()
 calculation_okx = CalculationOkxService()
