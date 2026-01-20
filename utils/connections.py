@@ -101,7 +101,7 @@ class MySQLAdapter:
             connection = Connection(host=config.get('HOST'),
                                     user=config.get('USER1'),
                                     password=config.get('PASS'),
-                                    database=config.get('DBNAME'),
+                                    database=config.get('DBNAME_OKX'),
                                     cursorclass=pymysql.cursors.DictCursor)
             connection.ping(False)
 
@@ -125,6 +125,21 @@ class MySQLAdapter:
         else:
             return connection
 
+
+    def _get_redis_okx(self):
+        try:
+            # print(config.get('USER1'))
+            # print(config.get('HOST'))
+            # print(config.get('PASS'))
+            # print(config.get('DBNAME'))
+            # connection = rd = redis.Redis(host='172.31.11.200', port=6379, db=0)
+            connection = rd = redis.Redis(host=config.get("REDIS_HOST_OKX"), port=6379, db=0)
+
+
+        except Exception as e:
+            logger.exception("failed to get redis connection")
+        else:
+            return connection
 
 
 

@@ -145,7 +145,7 @@ class SettingsService(MySQLAdapter):
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT `symbol` FROM `mocktrade`.`symbol`")
+            cursor.execute("SELECT `symbol` FROM `symbol`")
 
             # 1) load existing symbols into a set for quick lookup
             existing = {row["symbol"] for row in cursor.fetchall()}
@@ -171,9 +171,69 @@ class SettingsService(MySQLAdapter):
 
                 # 4) insert the new row
                 cursor.execute("""
-                    INSERT INTO `mocktrade`.`symbol` (symbol, price, qty)
+                    INSERT INTO `symbol` (symbol, price, qty)
                     VALUES (%s, %s, %s)
                 """, (base, price_prec, qty_prec))
+                logger.info(f"Added new symbol {base}: price={price_prec}, qty={qty_prec}")
+
+                count += 1
+
+            # 5) commit if all went well
+            conn.commit()
+
+            return {
+                "status" : "success",
+                "message": f"total {count} number of precision info added to the symbol table"
+            }
+
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            logger.warning(f"Failed to update precision from the binance API: {e!r}")
+
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    def update_precision_okx(self):
+        PRECISION_API = "https://fapi.binance.com/fapi/v1/exchangeInfo"
+        conn = None
+        cursor = None
+        count = 0
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT `symbol` FROM `symbol_okx`")
+
+            # 1) load existing symbols into a set for quick lookup
+            existing = {row["symbol"] for row in cursor.fetchall()}
+
+            # 2) fetch and parse Binance exchangeInfo
+            resp = requests.get(PRECISION_API, timeout=10)
+            resp.raise_for_status()
+            info = resp.json()
+
+            # 3) iterate over each symbol in the API payload
+            for entry in info.get("symbols", []):
+                full_sym = entry.get("symbol", "")
+                if not full_sym.endswith("USDT"):
+                    continue
+
+                base = full_sym[:-4] # strip off 'USDT'
+                if base in existing:
+                    # already in your table -> skip
+                    continue
+
+                price_prec = entry.get("pricePrecision")
+                qty_prec = entry.get("quantityPrecision")
+
+                # 4) insert the new row
+                cursor.execute("""
+                               INSERT INTO `symbol_okx` (symbol, price, qty)
+                               VALUES (%s, %s, %s)
+                               """, (base, price_prec, qty_prec))
                 logger.info(f"Added new symbol {base}: price={price_prec}, qty={qty_prec}")
 
                 count += 1
@@ -208,7 +268,7 @@ class SettingsService(MySQLAdapter):
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT symbol, price, qty FROM mocktrade.symbol")
+            cursor.execute("SELECT symbol, price, qty FROM symbol")
             rows = cursor.fetchall()
 
             out: dict[str, dict[str, int]] = {}

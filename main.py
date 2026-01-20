@@ -11,6 +11,8 @@ from routers import (
     frontapi_routers,
     execute_routers,
     websocket_routers,
+    trei_okx_routers,
+    frontapi_okx_routers
 )
 
 from scheduler import start_scheduler, shutdown_scheduler
@@ -64,7 +66,9 @@ app.add_middleware(
 )
 
 app.include_router(trei_routers.router,      prefix='/trading')
+app.include_router(trei_okx_routers.router, prefix='/trading_okx')
 app.include_router(frontapi_routers.router,  prefix='/user')
+app.include_router(frontapi_okx_routers.router,  prefix='/user_okx')
 app.include_router(settings_routers.router,  prefix='/settings')
 app.include_router(execute_routers.router,   prefix='/execute')
 app.include_router(websocket_routers.router, prefix='/ws')

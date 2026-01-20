@@ -14,6 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 
+from services.calculation_okx import CalculationOkxService
 from services.settings import SettingsService
 from utils.connections import MySQLAdapter  # adjust if your adapter lives elsewhere
 from services.trading import TradingService
@@ -21,6 +22,10 @@ from utils.local_redis import (update_position_status_to_redis,
                                update_balance_status_to_redis,
                                update_order_status_to_redis,
                                update_liq_price)
+from utils.local_redis_okx import (update_position_status_to_redis_okx,
+                                   update_balance_status_to_redis_okx,
+                                   update_order_status_to_redis_okx,
+                                   update_liq_price_okx)
 from services.calculation import CalculationService
 # from services.realtime import RealtimeService
 from starlette.config import Config
@@ -56,6 +61,7 @@ SYMBOL_TO_COINGECKO_ID = {
 # mysql = MySQLAdapter()
 trader = TradingService()
 calculation = CalculationService()
+calculation_okx = CalculationOkxService()
 # realtime = RealtimeService()
 svc = SettingsService()
 
@@ -286,70 +292,134 @@ async def update_status_to_redis():
     except Exception:
         logger.exception("Failed to update MySQL status to Redis")
 
+async def update_status_to_redis_okx():
+    try:
+        logger.info(f"Start updating MySQL status to redis at {datetime.now(timezone('Asia/Seoul'))}")
+        await update_position_status_to_redis_okx()
+        await update_order_status_to_redis_okx()
+        await update_balance_status_to_redis_okx()
+        await update_liq_price_okx()
+    except Exception:
+        logger.exception("Failed to update MySQL status to Redis")
+
 # ————————————————
 # scheduler wiring
 # ————————————————
 scheduler = AsyncIOScheduler(timezone=TZ)
 
+JOB_KW = dict(
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=30,  # interval 짧은 애들은 30~60초면 충분
+)
+
 interval_sec = int(config.get('STATUS_INTERVAL'))
+# scheduler.add_job(
+#     update_status_to_redis,
+#     trigger=IntervalTrigger(seconds=interval_sec),
+#     next_run_time=datetime.now(TZ),
+#     id="statusUpdater",
+#     replace_existing=True,
+#     **JOB_KW
+# )
 scheduler.add_job(
-    update_status_to_redis,
+    update_status_to_redis_okx,
     trigger=IntervalTrigger(seconds=interval_sec),
-    next_run_time=datetime.now(),
-    id="statusUpdater",
-    replace_existing=True
-)
-scheduler.add_job(
-    svc.reload_symbol_cache,
-    trigger=IntervalTrigger(days=1),
-    id="precisionCacheUpdater",
     next_run_time=datetime.now(TZ),
-    replace_existing=True
+    id="statusUpdater_okx",
+    replace_existing=True,
+    **JOB_KW
 )
+# scheduler.add_job(
+#     svc.reload_symbol_cache,
+#     trigger=IntervalTrigger(days=1),
+#     id="precisionCacheUpdater",
+#     next_run_time=datetime.now(TZ),
+#     replace_existing=True,
+#     **JOB_KW
+# )
+# scheduler.add_job(
+#     svc.update_precision,
+#     trigger=IntervalTrigger(days=1),
+#     id="precisionUpdater",
+#     replace_existing=True,
+#     max_instances=1,
+#     coalesce=True,
+#     misfire_grace_time=24*3600
+# )
 scheduler.add_job(
-    svc.update_precision,
+    svc.update_precision_okx,
     trigger=IntervalTrigger(days=1),
-    id="precisionUpdater",
-    replace_existing=True
+    next_run_time=datetime.now(TZ),
+    id="precisionUpdater_okx",
+    replace_existing=True,
+    **JOB_KW
 )
 pnl_sec = int(config.get('PNL_INTERVAL'))
+# scheduler.add_job(
+#     calculation.calculate_pnl,
+#     trigger=IntervalTrigger(seconds=pnl_sec),
+#     # next_run_time=datetime.now(),
+#     id="pnlCalculator",
+#     replace_existing=True,
+#     **JOB_KW
+# )
 scheduler.add_job(
-    calculation.calculate_pnl,
+    calculation_okx.calculate_pnl_okx,
     trigger=IntervalTrigger(seconds=pnl_sec),
     # next_run_time=datetime.now(),
-    id="pnlCalculator",
-    replace_existing=True
+    id="pnlCalculator_okx",
+    replace_existing=True,
+    **JOB_KW
 )
 liq_sec = int(config.get('LIQ_INTERVAL'))
+# scheduler.add_job(
+#     calculation.calculate_liq_prices,
+#     trigger=IntervalTrigger(seconds=liq_sec),
+#     # next_run_time=datetime.now(),
+#     id="liqCalculator",
+#     replace_existing=True,
+#     **JOB_KW
+# )
 scheduler.add_job(
-    calculation.calculate_liq_prices,
+    calculation_okx.calculate_liq_prices_okx,
     trigger=IntervalTrigger(seconds=liq_sec),
     # next_run_time=datetime.now(),
-    id="liqCalculator",
-    replace_existing=True
+    id="liqCalculator_okx",
+    replace_existing=True,
+    **JOB_KW
 )
 limit_sec = int(config.get('LIMIT_INTERVAL'))
+# scheduler.add_job(
+#     # calculation.settle_orders,
+#     calculation.settle_orders,
+#     trigger=IntervalTrigger(seconds=limit_sec),
+#     # next_run_time=datetime.now(),
+#     id="orderSettler",
+#     replace_existing=True,
+#     **JOB_KW
+# )
 scheduler.add_job(
-    # calculation.settle_orders,
-    calculation.settle_orders,
+    calculation_okx.settle_orders_okx,
     trigger=IntervalTrigger(seconds=limit_sec),
     # next_run_time=datetime.now(),
-    id="orderSettler",
-    replace_existing=True
+    id="orderSettler_okx",
+    replace_existing=True,
+    **JOB_KW
 )
-schedule_dump = config.get("SCHEDULE_DUMP", default="false").lower() == "true"
-if schedule_dump:
-    scheduler.add_job(
-        # daily_mysql_dump_simple,
-        daily_mysql_dump_s3,
-        trigger=CronTrigger(hour=3, minute=15, timezone='Asia/Seoul'),
-        next_run_time=datetime.now(),
-        id='mysqlDailyDump',
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=24*3600,
-    )
+# schedule_dump = config.get("SCHEDULE_DUMP", default="false").lower() == "true"
+# if schedule_dump:
+#     scheduler.add_job(
+#         # daily_mysql_dump_simple,
+#         daily_mysql_dump_s3,
+#         trigger=CronTrigger(hour=3, minute=15, timezone='Asia/Seoul'),
+#         next_run_time=datetime.now(TZ),
+#         id='mysqlDailyDump',
+#         replace_existing=True,
+#         max_instances=1,
+#         coalesce=True,
+#         misfire_grace_time=24*3600,
+#     )
 
 
 def _acquire_process_lock() -> bool:
