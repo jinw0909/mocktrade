@@ -16,8 +16,22 @@ router = APIRouter()
 logger = logging.getLogger("pnl_ws")
 config = Config('.env')
 # Redis clients (reuse your configured URLs)
-position_redis = aioredis.from_url("redis://localhost:6379/0", decode_responses=True)
-price_redis    = aioredis.from_url("redis://" + config.get("REDIS_HOST") + ":6379/0", decode_responses=True)
+# position_redis = aioredis.from_url("redis://localhost:6379/0", decode_responses=True)
+position_redis = aioredis.Redis(
+    host=config.get("LOCAL_REDIS"),
+    port=6379,
+    db=0,
+    decode_responses=True
+)
+
+# price_redis    = aioredis.from_url("redis://" + config.get("REDIS_HOST_OKX") + ":6379/0", decode_responses=True)
+price_redis = aioredis.Redis(
+    host=config.get("REDIS_HOST_OKX"),
+    port=6379,
+    db=0,
+    decode_responses=True
+)
+
 
 HEARTBEAT_INTERVAL = 30.0 # seconds
 MAINTENANCE_RATE = 0.01
@@ -31,10 +45,10 @@ async def liq_sender(websocket: WebSocket, user_id):
             try:
                 await asyncio.sleep(5.0)
                 # 1) Read user's positions, orders, and balance
-                bal_key = f"balances:{user_id}"
-                pos_key = f"positions:{user_id}"
-                ord_key = f"orders:{user_id}"
-                avl_key = f"availables:{user_id}"
+                bal_key = f"balances_okx:{user_id}"
+                pos_key = f"positions_okx:{user_id}"
+                ord_key = f"orders_okx:{user_id}"
+                avl_key = f"availables_okx:{user_id}"
 
                 balance = float(await position_redis.get(bal_key) or 0)
                 raw_pos = await position_redis.hgetall(pos_key)
@@ -123,16 +137,16 @@ async def liq_sender(websocket: WebSocket, user_id):
                         cursor = conn.cursor()
 
                         cursor.execute("""
-                            UPDATE mocktrade.user
-                               SET balance = GREATEST(balance + %s, 0)
-                             WHERE retri_id = %s
-                        """, (pnl_liq, user_id))
+                                       UPDATE user_okx
+                                       SET balance = GREATEST(balance + %s, 0)
+                                       WHERE retri_id = %s
+                                       """, (pnl_liq, user_id))
 
                         cursor.execute("""
-                            SELECT `id` FROM `mocktrade`.`user`
-                            WHERE `retri_id` = %s
-                            AND `status` = 0 
-                        """, (user_id, ))
+                                       SELECT `id` FROM `user_okx`
+                                       WHERE `retri_id` = %s
+                                         AND `status` = 0
+                                       """, (user_id, ))
                         row = cursor.fetchone()
                         if not row:
                             logger.warning(f"User not found with retri_id={user_id}")
@@ -140,16 +154,16 @@ async def liq_sender(websocket: WebSocket, user_id):
                         uid = row['id']
 
                         cursor.execute("""
-                            UPDATE `mocktrade`.`position_history`
-                               SET `status` = 3,
-                                   `pnl` = %s,
-                                   `datetime` = %s 
-                             WHERE `symbol` = %s
-                               AND `user_id` = %s
-                               AND `status` = 1
-                             ORDER BY `id` DESC
-                             LIMIT 1
-                        """, (pnl_liq, datetime.now(timezone('Asia/Seoul')), to_liquidate['symbol'], uid))
+                                       UPDATE `position_history_okx`
+                                       SET `status` = 3,
+                                           `pnl` = %s,
+                                           `datetime` = %s
+                                       WHERE `symbol` = %s
+                                         AND `user_id` = %s
+                                         AND `status` = 1
+                                       ORDER BY `id` DESC
+                                       LIMIT 1
+                                       """, (pnl_liq, datetime.now(timezone('Asia/Seoul')), to_liquidate['symbol'], uid))
 
                         conn.commit()
                     except Exception:
@@ -180,7 +194,7 @@ async def liq_sender(websocket: WebSocket, user_id):
                 break
             except Exception as e:
                 logger.exception(f"Unexpected error in liq_sender loop for user [{user_id}]")
-                await asyncio.sleep(2.0)
+                await asyncio.sleep(1.0)
 
     except asyncio.CancelledError:
         logger.info(f"socket error: cannot send liquidation price of user {user_id}")
@@ -190,6 +204,10 @@ async def liq_sender(websocket: WebSocket, user_id):
 async def pnl_stream(websocket: WebSocket, user_id: str):
     await websocket.accept()
     logger.info(f"User {user_id} connected to PnL stream")
+    await position_redis.set("ws_probe", f"connected:{user_id}")
+    info = await position_redis.info("server")
+    logger.info(f"Redis connected. run_id={info.get('run_id')} tcp_port={info.get('tcp_port')} redis_version={info.get('redis_version')}")
+
 
     last_heartbeat = time.monotonic()
 
@@ -201,7 +219,7 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
             #    Value: JSON string, e.g.
             #      {"trigger": "limit", "order": {...}}
             # -----------------------------
-            signal_key = f"signals:{user_id}"
+            signal_key = f"signals_okx:{user_id}"
             signal_raw = await position_redis.get(signal_key)
 
             if signal_raw:
@@ -233,7 +251,7 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
             # -----------------------------
             # 2) PnL updates from positions:{user_id}
             # -----------------------------
-            pos_key = f"positions:{user_id}"
+            pos_key = f"positions_okx:{user_id}"
             positions_raw = await position_redis.hgetall(pos_key)
 
             updates: list[dict] = []
@@ -261,7 +279,7 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
             # 3) Available balance from Redis (set by liq_sender)
             #    Key: availables:{user_id}
             # -----------------------------
-            avl_key = f"availables:{user_id}"
+            avl_key = f"availables_okx:{user_id}"
             try:
                 avl_raw = await position_redis.get(avl_key)
                 available = float(avl_raw) if avl_raw is not None else 0.0
@@ -304,7 +322,7 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
             # -----------------------------
             # 6) loop interval
             # -----------------------------
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(2.0)
 
     except WebSocketDisconnect:
         logger.info(f"User {user_id} disconnected cleanly")

@@ -12,7 +12,8 @@ from routers import (
     execute_routers,
     websocket_routers,
     trei_okx_routers,
-    frontapi_okx_routers
+    frontapi_okx_routers,
+    websocket_routers_okx
 )
 
 from scheduler import start_scheduler, shutdown_scheduler
@@ -57,9 +58,9 @@ async def lifespan(app: FastAPI):
 import os
 app = FastAPI(
     lifespan=lifespan,
-    root_path="/okx",
-    docs_url="/docs",
-    openapi_url="/openapi.json",
+    # root_path="/okx",
+    docs_url="/okx/docs",
+    openapi_url="/okx/openapi.json",
 )
 
 app.add_middleware(
@@ -76,7 +77,8 @@ app.include_router(frontapi_routers.router,  prefix='/user')
 app.include_router(frontapi_okx_routers.router,  prefix='/user_okx')
 app.include_router(settings_routers.router,  prefix='/settings')
 app.include_router(execute_routers.router,   prefix='/execute')
-app.include_router(websocket_routers.router, prefix='/ws')
+# app.include_router(websocket_routers.router, prefix='/ws')
+app.include_router(websocket_routers_okx.router, prefix='/ws')
 
 
 @app.get('/', tags=['Main'], summary='메인 화면 200 지정', deprecated=True)
