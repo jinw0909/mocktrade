@@ -58,9 +58,13 @@ async def lifespan(app: FastAPI):
 import os
 app = FastAPI(
     lifespan=lifespan,
-    # root_path="/okx",
-    docs_url="/okx/docs",
-    openapi_url="/okx/openapi.json",
+    # root_path="/okx",  # ❌ 빼도 됨
+    docs_url="/docs",
+    openapi_url="/openapi.json",
+    swagger_ui_parameters={
+        "url": "/okx/openapi.json"   # ✅ 중요: 스키마를 /okx 경유로 불러오게
+    },
+    redoc_url=None,  # 필요없으면
 )
 
 app.add_middleware(
