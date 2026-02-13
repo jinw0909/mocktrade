@@ -384,6 +384,11 @@ def calculate_new_position(current_position, order):
     }
 
 
+def calc_close_pnl(side: str, amount: float, entry: float, close: float) -> float:
+    side_sign = 1.0 if side == "buy" else -1.0
+    return side_sign * amount * (close - entry)
+
+
 class CalculationService(MySQLAdapter):
 
     def __init__(self):
@@ -493,19 +498,396 @@ class CalculationService(MySQLAdapter):
 
             await pipe.execute()
 
+    # async def calculate_liq_prices(self):
+    #     position_redis = await self.get_position_redis()
+    #     price_redis = await self.get_price_redis()
+    #
+    #     # ----------------------------------------------------------
+    #     # 0) GLOBAL FAIL-SAFE: 가격 시스템이 완전히 죽어있으면 전체 스킵
+    #     #    - price:* 키가 하나도 없으면 → 어떤 포지션도 청산/강제종료하지 않음
+    #     # ----------------------------------------------------------
+    #     has_any_price = False
+    #     async for _ in price_redis.scan_iter("price:*", count=1):
+    #         has_any_price = True
+    #         break
+    #
+    #     if not has_any_price:
+    #         logger.error(
+    #             "[LIQ] No price:* keys found in Redis. "
+    #             "Price system seems DOWN → Skipping all liquidation calculations."
+    #         )
+    #         return
+    #
+    #     async for pos_key in position_redis.scan_iter("positions:*"):
+    #         try:
+    #             _, user_id = pos_key.split(":")
+    #             raw_pos = await position_redis.hgetall(pos_key)
+    #             positions = [json.loads(p) for p in raw_pos.values()]
+    #             if not positions:
+    #                 continue
+    #
+    #             # load balance and orders
+    #             bal_key = f"balances:{user_id}"
+    #             ord_key = f"orders:{user_id}"
+    #             avl_key = f"availables:{user_id}"
+    #             # liq_key = f"liq_prices:{user_id}"  # 필요시 재활성화
+    #
+    #             balance = float(await position_redis.get(bal_key) or 0)
+    #             raw_ord = await position_redis.get(ord_key) or "[]"
+    #             orders = json.loads(raw_ord)
+    #
+    #             iso_pos = sum(p["margin"] for p in positions if p["margin_type"] == "isolated")
+    #             iso_ord = sum(
+    #                 o["margin"]
+    #                 for o in orders
+    #                 if o["margin_type"] == "isolated" and o["type"] in ("limit", "market")
+    #             )
+    #             cross_equity = balance - iso_pos - iso_ord
+    #
+    #             total_pos = sum(p["margin"] for p in positions)
+    #             total_ord = sum(o["margin"] for o in orders)
+    #             total_upnl = sum(
+    #                 p.get("unrealized_pnl", 0.0)
+    #                 for p in positions
+    #                 if p["margin_type"] == "cross"
+    #             )
+    #             available = balance - total_pos - total_ord + total_upnl
+    #             # await position_redis.set(avl_key, available)
+    #             available_to_write = available if available >= 0 else 0
+    #
+    #             # cross 포지션만 대상
+    #             cross = [p for p in positions if p["margin_type"] == "cross"]
+    #
+    #             # ----------------------------------------------------------
+    #             # 가격이 없는 포지션은 "스킵"만 하고 절대 강제청산하지 않는다.
+    #             # ----------------------------------------------------------
+    #             skipped_no_price = []
+    #             valid_cross = []
+    #
+    #             for p in cross:
+    #                 redis_key = f"price:{p['symbol']}USDT"
+    #                 raw = await price_redis.get(redis_key)
+    #
+    #                 if raw is None:
+    #                     logger.warning(
+    #                         f"[LIQ] No price for {p['symbol']} (user={user_id}, pos_id={p['pos_id']}). "
+    #                         "Skipping this position from liquidation calc."
+    #                     )
+    #                     skipped_no_price.append(p)
+    #                     continue
+    #
+    #                 try:
+    #                     p["market_price"] = float(raw)
+    #                 except (TypeError, ValueError):
+    #                     logger.error(
+    #                         f"[LIQ] Invalid price for {p['symbol']} ({raw!r}), "
+    #                         f"skipping pos_id={p['pos_id']}."
+    #                     )
+    #                     skipped_no_price.append(p)
+    #                     continue
+    #
+    #                 valid_cross.append(p)
+    #
+    #             # 가격이 있는 cross 포지션만 사용
+    #             cross = valid_cross
+    #
+    #             # 가격이 있는 cross 포지션이 하나도 없으면 이 유저는 더 이상 처리할 게 없음
+    #             if not cross:
+    #                 continue
+    #
+    #             # 2) precompute other-legs TMM & UPNL
+    #             other_tmm = {
+    #                 p["pos_id"]: sum(
+    #                     MAINTENANCE_RATE * q["market_price"] * q["amount"]
+    #                     for q in cross
+    #                     if q["pos_id"] != p["pos_id"]
+    #                 )
+    #                 for p in cross
+    #             }
+    #             other_upnl = {
+    #                 p["pos_id"]: sum(
+    #                     q.get("unrealized_pnl", 0.0)
+    #                     for q in cross
+    #                     if q["pos_id"] != p["pos_id"]
+    #                 )
+    #                 for p in cross
+    #             }
+    #
+    #             liq_prices = []
+    #             breaches = []
+    #
+    #             for p in cross:
+    #                 pid = p["pos_id"]
+    #                 E = p["entry_price"]
+    #                 S = p["amount"]
+    #                 MP = p["market_price"]
+    #                 side = 1 if p["side"] == "buy" else -1
+    #
+    #                 cumB = MAINTENANCE_RATE * E * S
+    #                 notional = side * S * E
+    #
+    #                 num = (
+    #                         cross_equity
+    #                         - other_tmm[pid]
+    #                         + other_upnl[pid]
+    #                         + cumB
+    #                         - notional
+    #                 )
+    #                 den = S * MAINTENANCE_RATE - side * S
+    #
+    #                 if den == 0:
+    #                     logger.warning(
+    #                         f"[LIQ] Denominator zero for pos_id={pid}, "
+    #                         f"user={user_id}, symbol={p['symbol']}. Skipping."
+    #                     )
+    #                     continue
+    #
+    #                 raw_lp = num / den
+    #
+    #                 # side-aware LP 보정
+    #                 if side == -1 and raw_lp <= 0:
+    #                     logger.info(
+    #                         f"[LIQ] Short pos_id={pid} has non-positive LP "
+    #                         f"({raw_lp:.6f}), skipping from liquidation table."
+    #                     )
+    #                     continue
+    #
+    #                 if side == 1 and raw_lp <= 0:
+    #                     lp = 0.0
+    #                 else:
+    #                     lp = raw_lp
+    #
+    #                 liq_prices.append(
+    #                     {
+    #                         "pos_id": pid,
+    #                         "symbol": p["symbol"],
+    #                         "liq_price": lp,
+    #                     }
+    #                 )
+    #
+    #                 if MP is not None:
+    #                     if (side == 1 and MP <= lp) or (side == -1 and MP >= lp):
+    #                         breaches.append(
+    #                             {
+    #                                 "pos_id": pid,
+    #                                 "symbol": p["symbol"],
+    #                                 "liq_price": lp,
+    #                                 "current": MP,
+    #                                 "pnl": p.get("unrealized_pnl", 0.0),
+    #                             }
+    #                         )
+    #
+    #             # 가장 손실(pnl)이 큰 놈 하나만 청산
+    #             to_liquidate = min(breaches, key=lambda b: b["pnl"]) if breaches else None
+    #
+    #             if to_liquidate:
+    #                 now_kst = datetime.now(timezone("Asia/Seoul"))
+    #                 sym = to_liquidate["symbol"]
+    #                 close_price = float(to_liquidate["current"])
+    #                 pos_hist_id = int(to_liquidate["pos_id"])
+    #
+    #                 # 0) Redis에서 포지션 원본 확보 (pnl 재계산용)
+    #                 blob = await position_redis.hget(pos_key, sym)
+    #                 if not blob:
+    #                     logger.warning(f"[CROSS-LIQ] missing redis pos blob user={user_id} sym={sym}")
+    #                     continue
+    #
+    #                 pos = json.loads(blob)
+    #                 entry = float(pos["entry_price"])
+    #                 amount = float(pos["amount"])
+    #                 side = pos["side"]
+    #
+    #                 # ✅ 현재가 기준으로 손익 재계산
+    #                 pnl_liq = float(calc_close_pnl(side, amount, entry, close_price))
+    #
+    #                 conn = None
+    #                 cursor = None
+    #                 try:
+    #                     conn = self._get_connection()
+    #                     conn.autocommit(False)
+    #                     cursor = conn.cursor()
+    #
+    #                     # 1) retri_id -> 내부 uid
+    #                     cursor.execute("""
+    #                                    SELECT id
+    #                                    FROM mocktrade.user
+    #                                    WHERE retri_id = %s AND status = 0
+    #                                    LIMIT 1
+    #                                    """, (user_id,))
+    #                     row = cursor.fetchone()
+    #                     if not row:
+    #                         conn.rollback()
+    #                         logger.warning(f"[CROSS-LIQ] user not found retri_id={user_id}")
+    #                         continue
+    #
+    #                     uid = row["id"]
+    #
+    #                     # 2) position_history: idempotent 청산 확정
+    #                     cursor.execute("""
+    #                                    UPDATE mocktrade.position_history
+    #                                    SET status = 3,
+    #                                        pnl = %s,
+    #                                        datetime = %s,
+    #                                        close_price = %s
+    #                                    WHERE id = %s
+    #                                      AND user_id = %s
+    #                                      AND status = 1
+    #                                    """, (pnl_liq, now_kst, close_price, pos_hist_id, uid))
+    #
+    #                     if cursor.rowcount == 0:
+    #                         # 이미 청산/종료 처리됨
+    #                         conn.rollback()
+    #                         continue
+    #
+    #                     # 3) user balance 반영 (DB가 진실)
+    #                     cursor.execute("""
+    #                                    UPDATE mocktrade.user
+    #                                    SET balance = GREATEST(balance + %s, 0)
+    #                                    WHERE retri_id = %s
+    #                                    """, (pnl_liq, user_id))
+    #
+    #                     # 4) liquidation order_history insert (중복 방지)
+    #                     cursor.execute("""
+    #                                    SELECT 1
+    #                                    FROM mocktrade.order_history
+    #                                    WHERE po_id = %s
+    #                                      AND type = 'liquidation'
+    #                                    LIMIT 1
+    #                                    """, (pos_hist_id,))
+    #                     exists = cursor.fetchone()
+    #
+    #                     if not exists:
+    #                         liq_side = "sell" if side == "buy" else "buy"
+    #                         cursor.execute("""
+    #                                        INSERT INTO mocktrade.order_history (
+    #                                            user_id, symbol, type, margin_type, side,
+    #                                            price, magin, amount, leverage, status,
+    #                                            insert_time, update_time, order_price, po_id,
+    #                                            tp, sl, order_historycol, or_id
+    #                                        ) VALUES (
+    #                                                     %s, %s, 'liquidation', 'cross', %s,
+    #                                                     %s, %s, %s, %s, %s,
+    #                                                     %s, %s, %s, %s,
+    #                                                     NULL, NULL, NULL, NULL
+    #                                                 )
+    #                                        """, (
+    #                                            uid, sym, liq_side,
+    #                                            close_price,
+    #                                            float(pos.get("margin", 0.0)),
+    #                                            amount,
+    #                                            float(pos.get("leverage", 0.0)),
+    #                                            1,
+    #                                            now_kst, now_kst,
+    #                                            close_price,
+    #                                            pos_hist_id
+    #                                        ))
+    #
+    #                     # 5) (중요) 해당 심볼 TP/SL 주문 취소 (cross도 같이 정리하는 게 맞음)
+    #                     cursor.execute("""
+    #                                    UPDATE mocktrade.order_history
+    #                                    SET status = 4
+    #                                    WHERE user_id = %s
+    #                                      AND symbol = %s
+    #                                      AND type IN ('tp','sl')
+    #                                      AND status = 1
+    #                                    """, (uid, sym))
+    #
+    #                     conn.commit()
+    #
+    #                     logger.warning(
+    #                         f"[CROSS-LIQ] retri_id={user_id} uid={uid} pos_id={pos_hist_id} sym={sym} "
+    #                         f"side={side} entry={entry} close={close_price} amt={amount} pnl={pnl_liq:.4f}"
+    #                     )
+    #
+    #                     # ✅ Redis는 여기서 직접 수정하지 말고, DB→Redis 싱크로 통일
+    #                     await update_position_status_per_user(uid, user_id)
+    #                     await update_order_status_per_user(uid, user_id)
+    #                     await update_balance_status_per_user(uid, user_id)
+    #
+    #                     # (선택) 소켓 알림은 유지
+    #                     await self.send_redis_signal(
+    #                         retri_id=user_id,
+    #                         payload={"trigger": "liquidation_cross", "pos": {**to_liquidate, "pnl": pnl_liq}},
+    #                     )
+    #
+    #                     # liq_prices에서 제거 (Redis에 liq_price 쓰는 루프에서 빠지게)
+    #                     liq_prices = [x for x in liq_prices if x["pos_id"] != pos_hist_id]
+    #
+    #                 except Exception:
+    #                     if conn:
+    #                         conn.rollback()
+    #                     logger.exception(f"[CROSS-LIQ] failed persisting liquidation retri_id={user_id} sym={sym}")
+    #                 finally:
+    #                     if cursor:
+    #                         cursor.close()
+    #                     if conn:
+    #                         conn.close()
+    #
+    #
+    #
+    #         # Redis에 liq_price만 업데이트 (cross margin만)
+    #             for lp_item in liq_prices:
+    #                 symbol = lp_item["symbol"]
+    #                 new_lp = lp_item["liq_price"]
+    #
+    #                 blob = await position_redis.hget(pos_key, symbol)
+    #                 if not blob:
+    #                     continue
+    #
+    #                 data = json.loads(blob)
+    #                 if data.get("margin_type") == "cross":
+    #                     data["liq_price"] = new_lp
+    #                     await position_redis.hset(pos_key, symbol, json.dumps(data))
+    #
+    #             await position_redis.set(avl_key, available_to_write)
+    #
+    #             # 필요시 유저별 liq_prices 테이블 유지하고 싶으면 아래 주석 풀기
+    #             # if liq_prices:
+    #             #     await position_redis.set(
+    #             #         liq_key,
+    #             #         json.dumps({"positions": liq_prices})
+    #             #     )
+    #             # else:
+    #             #     await position_redis.delete(liq_key)
+    #
+    #         except Exception:
+    #             logger.exception("Failed calculating liq prices for user")
+    #             continue
+
     async def calculate_liq_prices(self):
+        """
+        Cross liquidation + liq_price 갱신 + available 갱신
+
+        전제(네가 확인해준 status 규칙):
+          - order_history.status = 0  : open/pending (redis orders:* 싱크 대상)
+          - order_history.status = 1  : filled/executed (liquidation 기록은 여기)
+          - order_history.status = 4  : canceled (tp/sl 취소는 여기)
+
+        핵심:
+          1) cross 포지션 breach 중 손실(pnl) 가장 큰 1개만 청산
+          2) 청산 시점에 pnl을 현재가 기준으로 재계산(calc_close_pnl)
+          3) position_history.status=1 인 포지션만 status=3(청산)으로 바꿈 (idempotent)
+          4) order_history에 liquidation 1회 기록 (po_id + type='liquidation' 중복 방지)
+          5) 청산된 심볼의 TP/SL(open) 주문을 status=4로 즉시 취소
+          6) DB commit 후 Redis 반영(positions 제거, balance set)
+          7) DB가 truth이므로 per_user sync 호출로 Redis를 MySQL 기준으로 정합화
+          8) 마지막에 liq_price 업데이트 + available set
+
+        주의:
+          - MAINTENANCE_RATE, calc_close_pnl, update_*_per_user, send_redis_signal,
+            self._get_connection(), self.get_position_redis(), self.get_price_redis()
+            는 이미 존재한다고 가정.
+        """
         position_redis = await self.get_position_redis()
         price_redis = await self.get_price_redis()
 
         # ----------------------------------------------------------
-        # 0) GLOBAL FAIL-SAFE: 가격 시스템이 완전히 죽어있으면 전체 스킵
-        #    - price:* 키가 하나도 없으면 → 어떤 포지션도 청산/강제종료하지 않음
+        # 0) GLOBAL FAIL-SAFE: price:* 키가 하나도 없으면 전체 스킵
         # ----------------------------------------------------------
         has_any_price = False
         async for _ in price_redis.scan_iter("price:*", count=1):
             has_any_price = True
             break
-
         if not has_any_price:
             logger.error(
                 "[LIQ] No price:* keys found in Redis. "
@@ -513,83 +895,101 @@ class CalculationService(MySQLAdapter):
             )
             return
 
+        # cross liquidation 발생 유저들: 커밋 이후 per_user sync
+        liquidated_users: dict[int, str] = {}  # {mysql_user_id: retri_id}
+
         async for pos_key in position_redis.scan_iter("positions:*"):
             try:
-                _, user_id = pos_key.split(":")
+                _, retri_id = pos_key.split(":", 1)
+
                 raw_pos = await position_redis.hgetall(pos_key)
-                positions = [json.loads(p) for p in raw_pos.values()]
+                positions = []
+                for p in raw_pos.values():
+                    try:
+                        positions.append(json.loads(p))
+                    except Exception:
+                        continue
+
                 if not positions:
                     continue
 
-                # load balance and orders
-                bal_key = f"balances:{user_id}"
-                ord_key = f"orders:{user_id}"
-                avl_key = f"availables:{user_id}"
-                # liq_key = f"liq_prices:{user_id}"  # 필요시 재활성화
+                # ---- redis keys
+                bal_key = f"balances:{retri_id}"
+                ord_key = f"orders:{retri_id}"
+                avl_key = f"availables:{retri_id}"
 
-                balance = float(await position_redis.get(bal_key) or 0)
+                # ---- snapshot (루프 시작 시점)
+                balance = float(await position_redis.get(bal_key) or 0.0)
                 raw_ord = await position_redis.get(ord_key) or "[]"
-                orders = json.loads(raw_ord)
+                try:
+                    orders = json.loads(raw_ord)
+                except Exception:
+                    orders = []
 
-                iso_pos = sum(p["margin"] for p in positions if p["margin_type"] == "isolated")
+                # ---- isolated가 cross_equity에서 빠져야 함
+                iso_pos = sum(p.get("margin", 0.0) for p in positions if p.get("margin_type") == "isolated")
                 iso_ord = sum(
-                    o["margin"]
+                    o.get("margin", 0.0)
                     for o in orders
-                    if o["margin_type"] == "isolated" and o["type"] in ("limit", "market")
+                    if o.get("margin_type") == "isolated" and o.get("type") in ("limit", "market")
                 )
                 cross_equity = balance - iso_pos - iso_ord
 
-                total_pos = sum(p["margin"] for p in positions)
-                total_ord = sum(o["margin"] for o in orders)
+                # ---- available 계산(= balance - pos_margin - ord_margin + cross_upnl)
+                total_pos = sum(p.get("margin", 0.0) for p in positions)
+                total_ord = sum(o.get("margin", 0.0) for o in orders)  # ⚠️ 네 구조상 orders redis는 open만 유지됨
                 total_upnl = sum(
                     p.get("unrealized_pnl", 0.0)
                     for p in positions
-                    if p["margin_type"] == "cross"
+                    if p.get("margin_type") == "cross"
                 )
+
                 available = balance - total_pos - total_ord + total_upnl
-                await position_redis.set(avl_key, available)
+                available_to_write = max(available, 0.0)
 
-                # cross 포지션만 대상
-                cross = [p for p in positions if p["margin_type"] == "cross"]
+                # ---- cross positions only
+                cross = [p for p in positions if p.get("margin_type") == "cross"]
+                if not cross:
+                    # cross 없더라도 available은 갱신해둘지 정책 선택 가능
+                    await position_redis.set(avl_key, available_to_write)
+                    continue
 
                 # ----------------------------------------------------------
-                # 가격이 없는 포지션은 "스킵"만 하고 절대 강제청산하지 않는다.
+                # 가격이 없는 포지션은 스킵
                 # ----------------------------------------------------------
-                skipped_no_price = []
                 valid_cross = []
-
                 for p in cross:
-                    redis_key = f"price:{p['symbol']}USDT"
-                    raw = await price_redis.get(redis_key)
+                    sym = p.get("symbol")
+                    if not sym:
+                        continue
 
-                    if raw is None:
+                    redis_key = f"price:{sym}USDT"
+                    raw_price = await price_redis.get(redis_key)
+                    if raw_price is None:
                         logger.warning(
-                            f"[LIQ] No price for {p['symbol']} (user={user_id}, pos_id={p['pos_id']}). "
+                            f"[LIQ] No price for {sym} (retri_id={retri_id}, pos_id={p.get('pos_id')}). "
                             "Skipping this position from liquidation calc."
                         )
-                        skipped_no_price.append(p)
                         continue
 
                     try:
-                        p["market_price"] = float(raw)
+                        p["market_price"] = float(raw_price)
                     except (TypeError, ValueError):
                         logger.error(
-                            f"[LIQ] Invalid price for {p['symbol']} ({raw!r}), "
-                            f"skipping pos_id={p['pos_id']}."
+                            f"[LIQ] Invalid price for {sym} ({raw_price!r}), skipping pos_id={p.get('pos_id')}."
                         )
-                        skipped_no_price.append(p)
                         continue
 
                     valid_cross.append(p)
 
-                # 가격이 있는 cross 포지션만 사용
                 cross = valid_cross
-
-                # 가격이 있는 cross 포지션이 하나도 없으면 이 유저는 더 이상 처리할 게 없음
                 if not cross:
+                    await position_redis.set(avl_key, available_to_write)
                     continue
 
-                # 2) precompute other-legs TMM & UPNL
+                # ----------------------------------------------------------
+                # other-legs TMM & UPNL
+                # ----------------------------------------------------------
                 other_tmm = {
                     p["pos_id"]: sum(
                         MAINTENANCE_RATE * q["market_price"] * q["amount"]
@@ -607,18 +1007,21 @@ class CalculationService(MySQLAdapter):
                     for p in cross
                 }
 
-                liq_prices = []
-                breaches = []
+                # ----------------------------------------------------------
+                # liq_price 계산 + breach 탐지
+                # ----------------------------------------------------------
+                liq_prices: list[dict] = []
+                breaches: list[dict] = []
 
                 for p in cross:
                     pid = p["pos_id"]
-                    E = p["entry_price"]
-                    S = p["amount"]
-                    MP = p["market_price"]
-                    side = 1 if p["side"] == "buy" else -1
+                    E = float(p["entry_price"])
+                    S = float(p["amount"])
+                    MP = float(p["market_price"])
+                    side_sign = 1 if p.get("side") == "buy" else -1
 
                     cumB = MAINTENANCE_RATE * E * S
-                    notional = side * S * E
+                    notional = side_sign * S * E
 
                     num = (
                             cross_equity
@@ -627,176 +1030,277 @@ class CalculationService(MySQLAdapter):
                             + cumB
                             - notional
                     )
-                    den = S * MAINTENANCE_RATE - side * S
-
+                    den = S * MAINTENANCE_RATE - side_sign * S
                     if den == 0:
                         logger.warning(
-                            f"[LIQ] Denominator zero for pos_id={pid}, "
-                            f"user={user_id}, symbol={p['symbol']}. Skipping."
+                            f"[LIQ] Denominator zero for pos_id={pid}, retri_id={retri_id}, symbol={p.get('symbol')}. Skipping."
                         )
                         continue
 
                     raw_lp = num / den
 
-                    # side-aware LP 보정
-                    if side == -1 and raw_lp <= 0:
+                    # side-aware 보정
+                    if side_sign == -1 and raw_lp <= 0:
+                        # short인데 LP <= 0 이면 테이블에서 제외
                         logger.info(
-                            f"[LIQ] Short pos_id={pid} has non-positive LP "
-                            f"({raw_lp:.6f}), skipping from liquidation table."
+                            f"[LIQ] Short pos_id={pid} has non-positive LP ({raw_lp:.6f}), skipping from liquidation table."
                         )
                         continue
 
-                    if side == 1 and raw_lp <= 0:
-                        lp = 0.0
-                    else:
-                        lp = raw_lp
+                    lp = 0.0 if (side_sign == 1 and raw_lp <= 0) else raw_lp
 
-                    liq_prices.append(
-                        {
-                            "pos_id": pid,
-                            "symbol": p["symbol"],
-                            "liq_price": lp,
-                        }
-                    )
+                    liq_prices.append({"pos_id": pid, "symbol": p["symbol"], "liq_price": lp})
 
-                    if MP is not None:
-                        if (side == 1 and MP <= lp) or (side == -1 and MP >= lp):
-                            breaches.append(
-                                {
-                                    "pos_id": pid,
-                                    "symbol": p["symbol"],
-                                    "liq_price": lp,
-                                    "current": MP,
-                                    "pnl": p.get("unrealized_pnl", 0.0),
-                                }
-                            )
+                    # breach
+                    if (side_sign == 1 and MP <= lp) or (side_sign == -1 and MP >= lp):
+                        breaches.append(
+                            {
+                                "pos_id": pid,
+                                "symbol": p["symbol"],
+                                "liq_price": lp,
+                                "current": MP,
+                                "pnl": float(p.get("unrealized_pnl", 0.0)),  # 선택 기준용
+                            }
+                        )
 
-                # 가장 손실(pnl)이 큰 놈 하나만 청산
+                # ----------------------------------------------------------
+                # 가장 손실(pnl)이 큰 1개만 청산
+                # ----------------------------------------------------------
                 to_liquidate = min(breaches, key=lambda b: b["pnl"]) if breaches else None
 
                 if to_liquidate:
-                    pnl_liq = to_liquidate["pnl"]
+                    sym = to_liquidate["symbol"]
+
+                    # Redis 원본 확보 (pnl 재계산용)
+                    blob = await position_redis.hget(pos_key, sym)
+                    if not blob:
+                        logger.warning(f"[CROSS-LIQ] missing redis pos blob retri_id={retri_id} sym={sym}")
+                        to_liquidate = None
+
+                if to_liquidate:
+                    now_kst = datetime.now(timezone("Asia/Seoul"))
+                    sym = to_liquidate["symbol"]
+                    close_price = float(to_liquidate["current"])
+                    pos_hist_id = int(to_liquidate["pos_id"])
+
+                    pos = json.loads(blob)
+                    entry = float(pos["entry_price"])
+                    amount = float(pos["amount"])
+                    side = pos["side"]
+                    leverage = float(pos.get("leverage", 0.0))
+                    margin = float(pos.get("margin", 0.0))
+
+                    # ✅ 현재가 기준 pnl 재계산
+                    pnl_liq = float(calc_close_pnl(side, amount, entry, close_price))
                     new_balance = max(balance + pnl_liq, 0.0)
 
                     conn = None
                     cursor = None
+                    committed = False
+
                     try:
                         conn = self._get_connection()
                         conn.autocommit(False)
                         cursor = conn.cursor()
 
-                        # 1. 사용자 balance 업데이트
+                        # 1) retri_id -> 내부 uid
                         cursor.execute(
                             """
-                            UPDATE mocktrade.user
-                            SET balance = GREATEST(balance + %s, 0)
-                            WHERE retri_id = %s
-                            """,
-                            (pnl_liq, user_id),
-                        )
-
-                        # 2. retri_id → 내부 user id
-                        cursor.execute(
-                            """
-                            SELECT `id` FROM mocktrade.user
+                            SELECT id
+                            FROM mocktrade.user
                             WHERE retri_id = %s AND status = 0
+                            LIMIT 1
                             """,
-                            (user_id,),
+                            (retri_id,),
                         )
                         row = cursor.fetchone()
                         if not row:
-                            logger.warning(
-                                f"[LIQ] User not found with retri_id={user_id} "
-                                "while persisting liquidation."
-                            )
-                            # balance UPDATE는 이미 실행되었기 때문에 여기서 continue하면
-                            # commit이 안 되는 구조 → 필요하면 로직 조정 가능
                             conn.rollback()
-                        else:
-                            uid = row["id"]
+                            logger.warning(f"[CROSS-LIQ] user not found retri_id={retri_id}")
+                            raise RuntimeError("user not found")
 
-                            # 3. 최신 active 포지션을 청산 상태로
+                        uid = int(row["id"])
+
+                        # 2) position_history: 청산 확정 (idempotent)
+                        cursor.execute(
+                            """
+                            UPDATE mocktrade.position_history
+                            SET status = 3,
+                                pnl = %s,
+                                datetime = %s,
+                                close_price = %s
+                            WHERE id = %s
+                              AND user_id = %s
+                              AND status = 1
+                            """,
+                            (pnl_liq, now_kst, close_price, pos_hist_id, uid),
+                        )
+
+                        if cursor.rowcount == 0:
+                            # 이미 처리됨(다른 루틴/중복 실행)
+                            conn.rollback()
+                            to_liquidate = None
+                            committed = False
+                        else:
+                            # 3) user balance 반영
                             cursor.execute(
                                 """
-                                UPDATE mocktrade.position_history
-                                SET status = 3,
-                                    pnl = %s,
-                                    datetime = %s,
-                                    close_price = %s
-                                WHERE symbol = %s
-                                  AND user_id = %s
-                                  AND status = 1
-                                ORDER BY id DESC
+                                UPDATE mocktrade.user
+                                SET balance = GREATEST(balance + %s, 0)
+                                WHERE retri_id = %s
+                                """,
+                                (pnl_liq, retri_id),
+                            )
+
+                            # 4) 청산된 심볼의 TP/SL(open) 즉시 취소 (margin lock 해제는 다음 tick available 계산에서 반영)
+                            cursor.execute(
+                                """
+                                UPDATE mocktrade.order_history
+                                SET status = 4,
+                                    update_time = %s
+                                WHERE user_id = %s
+                                  AND symbol = %s
+                                  AND status = 0
+                                  AND type IN ('tp','sl')
+                                """,
+                                (now_kst, uid, sym),
+                            )
+
+                            # 5) order_history liquidation 기록 (중복 방지)
+                            cursor.execute(
+                                """
+                                SELECT 1
+                                FROM mocktrade.order_history
+                                WHERE po_id = %s AND type = 'liquidation'
                                 LIMIT 1
                                 """,
-                                (
-                                    pnl_liq,
-                                    datetime.now(timezone("Asia/Seoul")),
-                                    to_liquidate["current"],
-                                    to_liquidate["symbol"],
-                                    uid,
-                                ),
+                                (pos_hist_id,),
                             )
+                            exists = cursor.fetchone()
+
+                            if not exists:
+                                liq_side = "sell" if side == "buy" else "buy"
+
+                                cursor.execute(
+                                    """
+                                    INSERT INTO mocktrade.order_history (
+                                        user_id, symbol, type, margin_type, side,
+                                        price, magin, amount, leverage, status,
+                                        insert_time, update_time, order_price, po_id,
+                                        tp, sl, order_historycol, or_id
+                                    ) VALUES (
+                                                 %s, %s, 'liquidation', 'cross', %s,
+                                                 %s, %s, %s, %s, %s,
+                                                 %s, %s, %s, %s,
+                                                 NULL, NULL, NULL, NULL
+                                             )
+                                    """,
+                                    (
+                                        uid, sym, liq_side,
+                                        close_price, margin, amount, leverage, 1,  # ✅ status=1 (executed)
+                                        now_kst, now_kst, close_price, pos_hist_id,
+                                    ),
+                                )
 
                             conn.commit()
+                            committed = True
 
-                            # 4. Redis 포지션 제거 및 balance 반영
-                            await position_redis.hdel(pos_key, to_liquidate["symbol"])
-                            await position_redis.set(bal_key, new_balance)
-
-                            liq_prices = [
-                                p
-                                for p in liq_prices
-                                if p["pos_id"] != to_liquidate["pos_id"]
-                            ]
-
-                            # 5. 소켓 알림
-                            await self.send_redis_signal(
-                                retri_id=user_id,
-                                payload={
-                                    "trigger": "liquidation_cross",
-                                    "pos": to_liquidate,
-                                },
+                            logger.warning(
+                                f"[CROSS-LIQ] retri_id={retri_id} uid={uid} pos_id={pos_hist_id} sym={sym} "
+                                f"side={side} entry={entry} close={close_price} amt={amount} "
+                                f"pnl={pnl_liq:.4f} bal_before={balance:.4f} bal_after={new_balance:.4f}"
                             )
+
+                            # DB truth → per_user sync용
+                            liquidated_users[uid] = retri_id
 
                     except Exception:
                         if conn:
                             conn.rollback()
-                        logger.exception(
-                            f"[LIQ] Failed persisting liquidation for retri_id={user_id}"
-                        )
+                        logger.exception(f"[CROSS-LIQ] failed persisting liquidation retri_id={retri_id} sym={sym}")
+                        committed = False
                     finally:
                         if cursor:
-                            cursor.close()
+                            try:
+                                cursor.close()
+                            except:
+                                pass
                         if conn:
-                            conn.close()
+                            try:
+                                conn.close()
+                            except:
+                                pass
 
-                # Redis에 liq_price만 업데이트 (cross margin만)
+                    # 6) Redis 반영 (DB 커밋 성공 시에만)
+                    if committed:
+                        # positions 제거
+                        await position_redis.hdel(pos_key, sym)
+                        # balance 반영
+                        await position_redis.set(bal_key, new_balance)
+
+                        # 소켓 알림
+                        await self.send_redis_signal(
+                            retri_id=retri_id,
+                            payload={
+                                "trigger": "liquidation_cross",
+                                "pos": {**to_liquidate, "pnl": pnl_liq, "entry": entry, "side": side},
+                            },
+                        )
+
+                        # liq_prices에서 제거
+                        liq_prices = [x for x in liq_prices if int(x["pos_id"]) != pos_hist_id]
+
+                        # available 재계산 (방금 청산된 심볼 제외)
+                        positions_after = [pp for pp in positions if pp.get("symbol") != sym]
+                        total_pos_after = sum(pp.get("margin", 0.0) for pp in positions_after)
+                        total_upnl_after = sum(
+                            pp.get("unrealized_pnl", 0.0)
+                            for pp in positions_after
+                            if pp.get("margin_type") == "cross"
+                        )
+                        available_to_write = max(new_balance - total_pos_after - total_ord + total_upnl_after, 0.0)
+
+                # ----------------------------------------------------------
+                # Redis에 liq_price 업데이트 (cross만)
+                # ----------------------------------------------------------
                 for lp_item in liq_prices:
-                    symbol = lp_item["symbol"]
-                    new_lp = lp_item["liq_price"]
+                    sym2 = lp_item["symbol"]
+                    new_lp = float(lp_item["liq_price"])
 
-                    blob = await position_redis.hget(pos_key, symbol)
-                    if not blob:
+                    blob2 = await position_redis.hget(pos_key, sym2)
+                    if not blob2:
                         continue
 
-                    data = json.loads(blob)
+                    try:
+                        data = json.loads(blob2)
+                    except Exception:
+                        continue
+
                     if data.get("margin_type") == "cross":
                         data["liq_price"] = new_lp
-                        await position_redis.hset(pos_key, symbol, json.dumps(data))
+                        await position_redis.hset(pos_key, sym2, json.dumps(data))
 
-                # 필요시 유저별 liq_prices 테이블 유지하고 싶으면 아래 주석 풀기
-                # if liq_prices:
-                #     await position_redis.set(
-                #         liq_key,
-                #         json.dumps({"positions": liq_prices})
-                #     )
-                # else:
-                #     await position_redis.delete(liq_key)
+                # ----------------------------------------------------------
+                # available 최종 1회 SET
+                # ----------------------------------------------------------
+                await position_redis.set(avl_key, max(float(available_to_write), 0.0))
 
             except Exception:
                 logger.exception("Failed calculating liq prices for user")
                 continue
+
+        # ----------------------------------------------------------
+        # 청산 발생 유저는 MySQL -> Redis per-user 싱크
+        # (order_history tp/sl 취소 반영, balance/position 정합화)
+        # ----------------------------------------------------------
+        for mysql_uid, retri_id in liquidated_users.items():
+            try:
+                await update_position_status_per_user(mysql_uid, retri_id)
+                await update_order_status_per_user(mysql_uid, retri_id)
+                await update_balance_status_per_user(mysql_uid, retri_id)
+            except Exception:
+                logger.exception(f"[CROSS-LIQ] per-user sync failed uid={mysql_uid} retri_id={retri_id}")
+
 
     async def settle_orders(self):
         logger.info(f"executing settle orders at {datetime.now(timezone('Asia/Seoul'))}")
@@ -1466,16 +1970,7 @@ class CalculationService(MySQLAdapter):
                         margin = float(pos.get("margin", 0))
                         close_pnl = -margin
 
-                        # a) mark previous positions as closed
-                        cursor.execute("""
-                            UPDATE mocktrade.position_history
-                               SET status = 2
-                             WHERE status = 1
-                               AND symbol = %s
-                               AND user_id = %s
-                        """, (symbol, user_id))
-
-                        # b) update target position as liquidated
+                        # a) target_pos를 먼저 '청산'으로 바꿈 (열려 있을 때만)
                         cursor.execute("""
                             UPDATE mocktrade.position_history
                                SET pnl = %s,
@@ -1483,7 +1978,98 @@ class CalculationService(MySQLAdapter):
                                    status = 3,
                                    `datetime` = %s
                              WHERE id = %s
+                               AND status = 1
                         """, (close_pnl, market_price, datetime.now(timezone("Asia/Seoul")), pos_id))
+
+                        if cursor.rowcount == 0:
+                            logger.warning(f"position [{pos_id}] is not open. Skipping liquidation.")
+                            continue
+
+                        # a) mark previous positions as closed
+                        cursor.execute("""
+                            UPDATE mocktrade.position_history
+                               SET status = 2
+                             WHERE status = 1
+                               AND symbol = %s
+                               AND user_id = %s
+                               AND id <> %s 
+                        """, (symbol, user_id, pos_id))
+
+
+                        # b-1) insert liquidation order into order_history
+                        liq_side = "sell" if side == "buy" else "buy"
+
+                        # amount: 포지션 수량 (코인 수량이든 contracts든, 네 포지션 정의에 맞게)
+                        liq_amount = float(pos.get("amount", 0) or 0)
+
+                        # margin: 격리면 해당 포지션 증거금(=청산으로 날아간 금액)
+                        liq_margin = float(pos.get("margin", 0) or 0)
+
+                        # leverage: 포지션 레버리지 (없으면 0 또는 1)
+                        liq_leverage = float(pos.get("leverage", 0) or 0)
+
+                        now_kst = datetime.now(timezone("Asia/Seoul"))
+
+                        cursor.execute("""
+                                       INSERT INTO mocktrade.order_history (
+                                           user_id,
+                                           symbol,
+                                           type,
+                                           margin_type,
+                                           side,
+                                           price,
+                                           magin,
+                                           amount,
+                                           leverage,
+                                           status,
+                                           insert_time,
+                                           update_time,
+                                           order_price,
+                                           po_id,
+                                           tp,
+                                           sl,
+                                           order_historycol,
+                                           or_id
+                                       ) VALUES (
+                                                    %s,  -- user_id
+                                                    %s,  -- symbol
+                                                    %s,  -- type
+                                                    %s,  -- margin_type
+                                                    %s,  -- side
+                                                    %s,  -- price (체결가/청산가)
+                                                    %s,  -- magin (증거금)
+                                                    %s,  -- amount
+                                                    %s,  -- leverage
+                                                    %s,  -- status
+                                                    %s,  -- insert_time
+                                                    %s,  -- update_time
+                                                    %s,  -- order_price (주문가: 시장가면 체결가로 맞춤)
+                                                    %s,  -- po_id (포지션 id 연결: pos_id 사용)
+                                                    %s,  -- tp
+                                                    %s,  -- sl
+                                                    %s,  -- order_historycol (모르면 NULL)
+                                                    %s   -- or_id (모르면 NULL)
+                                                )
+                                       """, (
+                                           user_id,
+                                           symbol,
+                                           "liquidation",
+                                           "isolated",
+                                           liq_side,
+                                           float(market_price),  # price
+                                           liq_margin,           # magin (컬럼명이 magin인 경우)
+                                           liq_amount,
+                                           liq_leverage,
+                                           1,                 # status: 네 프로젝트에서 "filled/closed"가 몇 번인지에 맞춰 수정
+                                           now_kst,
+                                           now_kst,
+                                           float(market_price),  # order_price: 시장가면 보통 체결가로 기록
+                                           pos_id,            # po_id: 너가 이미 pos_id 가지고 있음
+                                           None,              # tp
+                                           None,              # sl
+                                           None,              # order_historycol
+                                           None               # or_id
+                                       ))
 
                         # c) debit wallet
                         cursor.execute("""
@@ -1510,6 +2096,9 @@ class CalculationService(MySQLAdapter):
 
                         cursor.execute("RELEASE SAVEPOINT lq_order")
                         liquidated += 1
+
+                        await position_redis.hdel(key, symbol)
+
                         logger.info(f"isolated position [{pos_id}] liquidated")
                         break
 
@@ -1520,6 +2109,7 @@ class CalculationService(MySQLAdapter):
                         continue
 
             conn.commit()
+
             for retri_id, message in pending_notifs:
                 await self.send_redis_signal(retri_id, message)
 

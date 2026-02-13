@@ -230,7 +230,6 @@ async def liquidate_cross():
     except Exception:
         logger.exception("Error during calculating cross margin positions")
 
-
 async def calculate_upnl():
     try:
         count = await trader.calculate_unrealized_pnl()
@@ -240,7 +239,6 @@ async def calculate_upnl():
     except Exception:
         # traceback.print_exc()
         logger.exception("Failed to update prices:")
-
 
 async def liquidate_positions():
     try:
@@ -252,7 +250,6 @@ async def liquidate_positions():
         # traceback.print_exc()
         logger.exception("Failed to update prices:")
 
-
 async def settle_limit_orders():
     try:
         count = await trader.settle_limit_orders()
@@ -262,7 +259,6 @@ async def settle_limit_orders():
     except Exception:
         # traceback.print_exc()
         logger.exception("Failed to update prices:")
-
 
 async def settle_tpsl_orders():
     try:
@@ -274,7 +270,6 @@ async def settle_tpsl_orders():
     except Exception:
         # traceback.print_exc()
         logger.exception("Failed to settle tp/sl orders")
-
 
 async def update_status_to_redis():
     try:
