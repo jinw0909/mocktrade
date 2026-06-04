@@ -21,7 +21,9 @@ origins = [
     'https://hjzheld.github.io',
     'https://dominance.retri.xyz',
     'https://dominance.tryex.xyz',
-    'https://tryex.xyz'
+    'https://tryex.xyz',
+    'http://121.133.75.223:3000',
+    'https://chart.risingx.co.kr'
 ]
 
 app.add_middleware(
