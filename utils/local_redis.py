@@ -14,7 +14,7 @@ logger = logging.getLogger('uvicorn')
 
 # decode_responses=True makes redis return str instead of bytes
 redis_client = aioredis.Redis(
-    host="localhost", port=6379, db=0, decode_responses=True
+    host=config.get('LOCAL_REDIS'), port=6379, db=0, decode_responses=True
 )
 price_redis = aioredis.Redis(
     host=config.get('REDIS_HOST'), port=6379, db=0, decode_responses=True
@@ -122,7 +122,6 @@ mysql = MySQLAdapter()
 #     finally:
 #         cursor.close()
 #         conn.close()
-
 
 async def update_position_status_to_redis():
     logger.info("Updating MySQL position status to the local Redis")
@@ -777,6 +776,7 @@ async def update_liq_price():
 #             cursor.close()
 #         if conn:
 #             conn.close()
+
 
 
 

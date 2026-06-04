@@ -3,14 +3,14 @@ from starlette.responses import JSONResponse
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from utils.frontapi import MySQLAdapter,MakeErrorType
+from utils.frontapi_okx import MySQLAdapter,MakeErrorType
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Optional
 from utils.local_redis import update_balance_status_per_user
 router= APIRouter()
 
 
-@router.get('/user_info', summary='USER INFO', tags=['USER API'])
+@router.get('/user_info', summary='USER INFO', tags=['USER API OKX'])
 async def api_select(retri_id:str ):
 
 
@@ -34,7 +34,7 @@ async def api_select(retri_id:str ):
 
 
 
-@router.post('/start_trading', summary='START', tags=['USER API'])
+@router.post('/start_trading', summary='START', tags=['USER API OKX'])
 async def api_select(retri_id:str ):
 
 
@@ -57,7 +57,7 @@ async def api_select(retri_id:str ):
 
 
 
-@router.post('/charge_seed', summary='SEED CHARGE', tags=['USER API'])
+@router.post('/charge_seed', summary='SEED CHARGE', tags=['USER API OKX'])
 async def api_select(retri_id: str,seed:float):
 
 
@@ -72,7 +72,6 @@ async def api_select(retri_id: str,seed:float):
 
         mysql.get_resetseed(retri_id,seed)
 
-
         await update_balance_status_per_user(None, retri_id)
 
 
@@ -84,7 +83,7 @@ async def api_select(retri_id: str,seed:float):
 
 
 
-@router.post('/reset_user', summary='RESET USER', tags=['USER API'])
+@router.post('/reset_user', summary='RESET USER', tags=['USER API OKX'])
 async def api_select(retri_id: str):
 
 
@@ -108,7 +107,7 @@ async def api_select(retri_id: str):
 
 
 
-@router.get('/get_position_list', summary='POSITION', tags=['USER API'])
+@router.get('/get_position_list', summary='POSITION', tags=['USER API OKX'])
 async def api_select(user_no: str,symbol:str=''):
 
 
@@ -141,7 +140,7 @@ async def api_select(user_no: str,symbol:str=''):
 
 
 
-@router.get('/get_order_list', summary='ORDER HISTORY', tags=['USER API'])
+@router.get('/get_order_list', summary='ORDER HISTORY', tags=['USER API OKX'])
 async def api_select(user_no: str):
 
 
@@ -172,7 +171,7 @@ async def api_select(user_no: str):
     return JSONResponse(mysql.return_dict_data, status_code=mysql.status_code)
 
 
-@router.get('/get_openorder_list', summary='OPEN ORDER', tags=['USER API'])
+@router.get('/get_openorder_list', summary='OPEN ORDER', tags=['USER API OKX'])
 async def api_select(user_no: str,symbol:str =''):
 
 
@@ -203,7 +202,7 @@ async def api_select(user_no: str,symbol:str =''):
 
 
 
-@router.get('/get_position_history', summary='POSITION HISTORY', tags=['USER API'])
+@router.get('/get_position_history', summary='POSITION HISTORY', tags=['USER API OKX'])
 async def api_select(user_no: str):
 
 
@@ -235,7 +234,7 @@ async def api_select(user_no: str):
 
 
 
-@router.get('/get_userbalance_list', summary='USER BALANCE', tags=['USER API'])
+@router.get('/get_userbalance_list', summary='USER BALANCE', tags=['USER API OKX'])
 async def api_select(user_no: str):
 
 
@@ -267,7 +266,7 @@ async def api_select(user_no: str):
 
 
 
-@router.get('/get_price', summary='USER PRICE', tags=['USER API'])
+@router.get('/get_price', summary='USER PRICE', tags=['USER API OKX'])
 async def api_select(symbol: str):
 
 
