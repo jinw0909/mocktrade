@@ -26,3 +26,6 @@ env/
 
 # OS generated
 Thumbs.db
+
+# Runtime logs
+logs/
