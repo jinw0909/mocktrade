@@ -15,6 +15,7 @@ env/
 .env
 
 # Logs and system files
+logs/
 *.log
 .DS_Store
 
@@ -27,5 +28,5 @@ env/
 # OS generated
 Thumbs.db
 
-# Runtime logs
-logs/
+dump.rdb
+

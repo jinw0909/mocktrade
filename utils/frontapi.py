@@ -440,7 +440,6 @@ class MySQLAdapter:
     #                 cursor.execute(sql)
     #                 result=cursor.fetchall()
     #                 result=pd.DataFrame(result)
-    #                 print('///////////////',len(result))
     #             #     new_dict={}
     #             if len(result)>0:
     #                 for i in result.iterrows():
@@ -557,7 +556,7 @@ class MySQLAdapter:
     #             'message': 'Server Error'
     #         }
     #         self.status_code = 500
-    
+
     def get_position_history(self, user_no):
         conn = self._get_connection()
         check = MakeErrorType()
@@ -632,7 +631,9 @@ class MySQLAdapter:
             }
             self.status_code = 500
         
-    
+
+
+        
     
     def get_diff_balance(self,user_no):
         
