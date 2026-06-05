@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import time
+import math
 
 from datetime import datetime, timedelta
 from pytz import timezone
@@ -483,8 +484,23 @@ class CalculationService(MySQLAdapter):
                 )
 
                 initial_notional = entry_price * amount
-                pnl_pct = (pnl / initial_notional * 100) if initial_notional else 0.0
-                roi_pct = (pnl / margin * 100) if margin else 0.0
+                initial_margin = (
+                    initial_notional / leverage
+                    if leverage
+                    else 0.0
+                )
+
+                pnl_pct = (
+                    pnl / initial_notional * 100
+                    if initial_notional
+                    else 0.0
+                )
+
+                roi_pct = (
+                    pnl / initial_margin * 100
+                    if initial_margin
+                    else 0.0
+                )
 
                 # Update in-memory
                 pos_data["unrealized_pnl"] = pnl
@@ -919,7 +935,44 @@ class CalculationService(MySQLAdapter):
                 avl_key = f"availables:{retri_id}"
 
                 # ---- snapshot (루프 시작 시점)
-                balance = float(await position_redis.get(bal_key) or 0.0)
+                # ---- snapshot (루프 시작 시점)
+                # balance 키 누락을 실제 잔고 0으로 처리하면 오청산이 발생할 수 있다.
+                raw_balance = await position_redis.get(bal_key)
+
+                if raw_balance is None:
+                    logger.error(
+                        "[LIQ-SKIP] Missing Redis balance key. "
+                        "Skipping liquidation calculation for safety. retri_id=%s key=%s",
+                        retri_id,
+                        bal_key,
+                    )
+                    continue
+
+                try:
+                    balance = float(raw_balance)
+                except (TypeError, ValueError):
+                    logger.error(
+                        "[LIQ-SKIP] Invalid Redis balance value. "
+                        "Skipping liquidation calculation for safety. "
+                        "retri_id=%s key=%s value=%r",
+                        retri_id,
+                        bal_key,
+                        raw_balance,
+                    )
+                    continue
+
+                if not math.isfinite(balance) or balance < 0:
+                    logger.error(
+                        "[LIQ-SKIP] Abnormal Redis balance value. "
+                        "Skipping liquidation calculation for safety. "
+                        "retri_id=%s key=%s value=%r",
+                        retri_id,
+                        bal_key,
+                        raw_balance,
+                    )
+                    continue
+
+                raw_ord = await position_redis.get(ord_key) or "[]"
                 raw_ord = await position_redis.get(ord_key) or "[]"
                 try:
                     orders = json.loads(raw_ord)
@@ -1092,7 +1145,7 @@ class CalculationService(MySQLAdapter):
 
                     # ✅ 현재가 기준 pnl 재계산
                     pnl_liq = float(calc_close_pnl(side, amount, entry, close_price))
-                    new_balance = max(balance + pnl_liq, 0.0)
+                    # new_balance = max(balance + pnl_liq, 0.0)
 
                     conn = None
                     cursor = None
@@ -1104,22 +1157,68 @@ class CalculationService(MySQLAdapter):
                         cursor = conn.cursor()
 
                         # 1) retri_id -> 내부 uid
+                        # cursor.execute(
+                        #     """
+                        #     SELECT id
+                        #     FROM mocktrade.user
+                        #     WHERE retri_id = %s AND status = 0
+                        #     LIMIT 1
+                        #     """,
+                        #     (retri_id,),
+                        # )
+                        # row = cursor.fetchone()
+                        # if not row:
+                        #     conn.rollback()
+                        #     logger.warning(f"[CROSS-LIQ] user not found retri_id={retri_id}")
+                        #     raise RuntimeError("user not found")
+                        #
+                        # uid = int(row["id"])
                         cursor.execute(
                             """
-                            SELECT id
+                            SELECT
+                                id,
+                                balance
                             FROM mocktrade.user
-                            WHERE retri_id = %s AND status = 0
+                            WHERE retri_id = %s
+                              AND status = 0
                             LIMIT 1
                             """,
                             (retri_id,),
                         )
+
                         row = cursor.fetchone()
+
                         if not row:
                             conn.rollback()
-                            logger.warning(f"[CROSS-LIQ] user not found retri_id={retri_id}")
+                            logger.warning(
+                                "[CROSS-LIQ] User not found. retri_id=%s",
+                                retri_id,
+                            )
                             raise RuntimeError("user not found")
 
                         uid = int(row["id"])
+                        db_balance = float(row["balance"] or 0.0)
+
+                        # Redis balance가 DB truth와 다르면 청산을 중단하고 Redis를 복구한다.
+                        # API 서버 주문 처리와 스케줄러 동기화가 겹쳐도 잘못된 balance로 청산하지 않는다.
+                        if abs(db_balance - balance) > 1e-6:
+                            await position_redis.set(bal_key, db_balance)
+
+                            conn.rollback()
+
+                            logger.error(
+                                "[LIQ-SKIP] Redis / DB balance mismatch. "
+                                "Liquidation aborted and Redis balance repaired. "
+                                "retri_id=%s uid=%s redis_balance=%s db_balance=%s",
+                                retri_id,
+                                uid,
+                                balance,
+                                db_balance,
+                            )
+
+                            raise RuntimeError("redis/db balance mismatch")
+
+                        new_balance = max(db_balance + pnl_liq, 0.0)
 
                         # 2) position_history: 청산 확정 (idempotent)
                         cursor.execute(
