@@ -800,7 +800,7 @@ class MySQLAdapter:
             return None  # 또는 적절한 기본값 설정
         factor = 10 ** n
         return math.floor(abs(x) * factor) / factor 
-    
+
     def floor_to_n_decimal1(self, x, n):
         if not math.isfinite(x):
             print("무한대나 NaN 값이 들어왔습니다.")
@@ -1640,8 +1640,7 @@ class MySQLAdapter:
                                 print("liq",liq_price)
                                 
                                 # self.inser_user_balance(user_no,new_balance)
-
-                                    
+                                print(self.floor_to_n_decimal(new_amount,qty_ch))
                                 self.inser_position_history(user_no,symbol,self.floor_to_n_decimal(usdt,price_ch),self.floor_to_n_decimal(new_amount,qty_ch),price,liq_price,0,new_usdt,0,margin_type,'buy',leverage,1,0,0,0)
                                 position,po=self.get_position_return(user_no,symbol)
                                 id=position['id'].iloc[0]
@@ -1801,7 +1800,6 @@ class MySQLAdapter:
 
                                             print(usdt, balance)
 
-                                            # 수정한 부분
                                             liq_price = self.floor_to_n_decimal1(new_price * (1 + adjusted_balance / new_size),price_ch) 
                                         self.cancel_position(user_no,id,new_usdt)
                                         self.inser_position_history(user_no,symbol,abs(self.floor_to_n_decimal(new_size,price_ch)),abs(self.floor_to_n_decimal(quantity,qty_ch)),float(price),float(liq_price),0,abs(new_margin),0,margin_type,'buy',leverage,1,0,0,0)
@@ -1874,6 +1872,7 @@ class MySQLAdapter:
                                 if usdt1 >0:
                                     print('여기까지실행')
                                     
+
                                     if   new_size==0 or quantity==0:
                                         print('22222222222222222222222222222222')
                                         self.cancel_position(user_no,id,new_usdt)
@@ -1894,7 +1893,7 @@ class MySQLAdapter:
 
                                             print(usdt, balance)
 
-                                            # 수정한 부분
+
                                             liq_price =self.floor_to_n_decimal1( new_price * (1 + adjusted_balance / new_size) ,price_ch)
                                         self.cancel_position(user_no,id,new_usdt)
                                         self.inser_position_history(user_no,symbol,abs(self.floor_to_n_decimal(new_size,price_ch)),abs(self.floor_to_n_decimal(quantity,qty_ch)),float(price),float(liq_price),0,abs(new_margin),0,margin_type,'buy',leverage,1,0,0,0)
@@ -2129,7 +2128,7 @@ class MySQLAdapter:
 
                     
                     if len(position_chck)>0:
-                        
+                        print('asdsadsadsadsadsadsadsa')
                         position_magin=position_chck[0]['size']
                         if position_chck[0]['side']=='buy':
                             position_side=True
@@ -2142,17 +2141,17 @@ class MySQLAdapter:
                         position_magin=0
                         position_side=False
                         
-                        
+                    print(position_side)
                     if position_side ==True:
-                        
+                        print('***********************************')
                         new_balance=float(balance)-new_usdt +float(position_magin)
                         
                         
                     else:
-                        
+                        print('//////////////////////////////////////')
                         new_balance=float(balance)-new_usdt 
                     
-                    
+                    print('bal',balance,'new_usdt ',new_usdt )
                     print('new_balance',new_balance)
                     
                     
@@ -2257,8 +2256,6 @@ class MySQLAdapter:
 
                                 if margin_type=='isolated':
 
-
-                                    #수정부분
                                     # liq_price = self.floor_to_n_decimal1(price * (1 + (1 / leverage)),price_ch)
                                     liq_price = self.floor_to_n_decimal1(new_price * (1 + (1 / leverage)),price_ch)
                                 else:
@@ -2356,12 +2353,11 @@ class MySQLAdapter:
                                             cross_bal=self.get_ava_balance(user_no)
                                             print('cross_bal',cross_bal)
                                             maintenance_margin = new_size * 0.005
-                                            # 수정한분
+                                            # 수정한 부분
                                             adjusted_balance = cross_bal+ maintenance_margin
 
                                             print(usdt, balance,new_price)
 
-                                            # 수정한 부분
                                             liq_price = self.floor_to_n_decimal1(new_price * (1 - adjusted_balance / new_size) ,price_ch)
                                         self.cancel_position(user_no,id,new_usdt)
                                         self.inser_position_history(user_no,symbol,abs(self.floor_to_n_decimal(new_size,price_ch)),abs(self.floor_to_n_decimal(quantity,qty_ch)),float(price),float(liq_price),0,abs(new_margin),0,margin_type,'sell',leverage,1,0,0,0)
@@ -2440,7 +2436,7 @@ class MySQLAdapter:
                                         
                                         print('22222222222222222222222222222222')
                                         self.cancel_position(user_no,id,new_usdt)
-                                        
+
                                     elif  new_size <0:
                                         print('111111111111111111111111111111111')
                                         new_margin=position['margin'].iloc[0]-new_usdt
@@ -2453,11 +2449,12 @@ class MySQLAdapter:
                                             cross_bal=self.get_ava_balance(user_no)
                                             print('cross_bal',cross_bal)
                                             maintenance_margin = new_size * 0.005
-                                            # 수정한부분
+                                            # 수정한 부분
                                             adjusted_balance = cross_bal+ maintenance_margin
 
                                             print(usdt, balance,new_price)
-                                            # 수정한 부분
+                                            ##### 수정 한부분
+
                                             liq_price = self.floor_to_n_decimal1(new_price * (1 - adjusted_balance / new_size) ,price_ch)
                                         self.cancel_position(user_no,id,new_usdt)
                                         self.inser_position_history(user_no,symbol,abs(self.floor_to_n_decimal(new_size,price_ch)),abs(self.floor_to_n_decimal(quantity,qty_ch)),float(price),float(liq_price),0,abs(new_margin),0,margin_type,'sell',leverage,1,0,0,0)
