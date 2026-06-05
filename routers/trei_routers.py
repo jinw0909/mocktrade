@@ -38,13 +38,6 @@ router= APIRouter()
 @router.post('/buy_limit_order', summary='ORDER', tags=['ORDER API'])
 async def api_select(user_no: str, symbol: str, margin_type: int, leverage: int,price:float, usdt: Optional[float] = 0, amount: Optional[float] = 0,tp: Optional[float] = 0, sl: Optional[float] = 0):
 
-    """
-<<<<<<< HEAD
-=======
-
-
->>>>>>> main
-    """
     mysql=MySQLAdapter()
     check = MakeErrorType()
     try:
