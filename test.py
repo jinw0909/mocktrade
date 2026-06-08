@@ -1,10 +1,10 @@
 import redis
 
 # 레디스 연결
-rd = redis.Redis(host='172.31.11.200', port=6379, db=0)
+rd = redis.Redis(host='172.31.6.152', port=6379, db=0)
 
 # 'price:BTCUSDT' 키에서 값 가져오기
-value = rd.get('price:BTCUSDT')
+value = rd.get('price:XRPUSDT')
 
 # 값이 존재할 경우 출력
 if value:
