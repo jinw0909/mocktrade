@@ -97,6 +97,7 @@ async def update_position_status_to_redis():
                      JOIN mocktrade.user AS u
                           ON ph.user_id = u.id
             WHERE ph.status = 1
+              AND ph.amount > 0 
             """
         )
 
@@ -253,6 +254,7 @@ async def update_position_status_per_user(user_id, retri_id=None):
             FROM mocktrade.position_history AS ph
             WHERE ph.user_id = %s
               AND ph.status = 1
+              AND ph.amount > 0  
             """,
             (user_id,),
         )

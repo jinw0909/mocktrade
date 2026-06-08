@@ -81,6 +81,14 @@ def calculate_position(current_position, order):
     PRICE_DP = prec["price"]
     QTY_DP = prec["qty"]
 
+    amount = round(float(order['amount']), QTY_DP)
+
+    if amount <= 0:
+        raise ValueError(
+            f"Invalid order amount after rounding: "
+            f"symbol={symbol}, amount={amount}, qty_dp={QTY_DP}"
+        )
+
     order_value = price * amount
     order_margin = order_value / leverage
 
@@ -111,7 +119,8 @@ def calculate_position(current_position, order):
 
     # Existing position details
     current_side = current_position['side']
-    current_amount = float(current_position['amount'])
+    # current_amount = float(current_position['amount'])
+    current_amount = round(float(current_position['amount']), QTY_DP)
     current_entry_price = float(current_position['entry_price'])
     current_margin = float(current_position['margin'])
     # current_size = float(current_position['size'])
@@ -123,15 +132,22 @@ def calculate_position(current_position, order):
     if current_side == side:
         logger.info("case 2: same side")
 
-        total_amount = current_amount + amount
+        # total_amount = current_amount + amount
+        total_amount = round(current_amount + amount, QTY_DP)
         total_value = (current_entry_price * current_amount) + (price * amount)
         # 1) guard avg_entry_price
-        if total_amount > 0:
-            avg_entry_price = total_value / total_amount
-        else:
-            # fallback to whatever makes sense — e.g. the new order price
-            avg_entry_price = price
-        # avg_entry_price = total_value / total_amount
+        # if total_amount > 0:
+        #     avg_entry_price = total_value / total_amount
+        # else:
+        #     # fallback to whatever makes sense — e.g. the new order price
+        #     avg_entry_price = price
+
+        if total_amount <= 0:
+            raise ValueError(
+                f"Invalid total amount: symbol={symbol}, total_amount={total_amount}"
+            )
+
+        avg_entry_price = total_value / total_amount
         total_size = total_amount * avg_entry_price
         # total_margin = current_margin + order_margin
         leverage = max(leverage, current_position.get('leverage', 1))
@@ -174,10 +190,12 @@ def calculate_position(current_position, order):
         }
 
     # 🔁 Case 3: Opposite-side → partial close, full close, or flip
-    if amount < current_amount:
+    remaining_amount = round(current_amount - amount, QTY_DP)
+    if remaining_amount > 0:
         logger.info("case 3-1, opposite side, partial close")
         # Partial close — reduce position
-        new_amount = current_amount - amount
+        new_amount = remaining_amount
+
         close_pnl = (price - current_entry_price) * amount if current_side == 'buy' else (
                                                                                                  current_entry_price - price) * amount
         fee = abs(close_pnl) * FEE_RATE
@@ -186,10 +204,10 @@ def calculate_position(current_position, order):
         # new_pnl = close_pnl
         leverage = current_position.get('leverage', 0)
         new_size = new_amount * current_entry_price
-        new_margin = (new_size / leverage) if leverage > 0 else new_size / current_margin * (new_amount / current_amount)
+        new_margin = (new_size / leverage) if leverage > 0 else 0.0
 
         # effective_leverage = current_size / current_margin if current_margin else leverage
-        leverage = max(order.get('leverage', 0), current_position.get('leverage', 0))
+        # leverage = max(order.get('leverage', 0), current_position.get('leverage', 0))
 
         liq_price = calc_iso_liq_price_from_margin(
             current_entry_price,
@@ -218,7 +236,7 @@ def calculate_position(current_position, order):
             "partial": True
         }
 
-    elif amount == current_amount:
+    elif remaining_amount == 0:
         logger.info("case 3-2, opposite side, full close")
         # Full close — no new position
         close_pnl = (price - current_entry_price) * amount if current_side == 'buy' else (current_entry_price - price) * amount
@@ -250,9 +268,9 @@ def calculate_position(current_position, order):
     else:
         # Flip — close current, open new opposite
         logger.info("case 3-3, opposite side, flip")
-        flip_amount = amount - current_amount
-        close_pnl = (price - current_entry_price) * current_amount if current_side == 'buy' else (
-                                                                                                         current_entry_price - price) * current_amount
+        # flip_amount = amount - current_amount
+        flip_amount = abs(remaining_amount)
+        close_pnl = (price - current_entry_price) * current_amount if current_side == 'buy' else (current_entry_price - price) * current_amount
         # new_pnl = close_pnl + current_pnl
         fee = abs(close_pnl) * FEE_RATE
         # new_pnl = close_pnl
@@ -270,7 +288,7 @@ def calculate_position(current_position, order):
         return {
             "user_id": user_id,
             "symbol": symbol,
-            "amount": round(flip_amount, QTY_DP),
+            "amount": flip_amount,
             "entry_price": round(price, PRICE_DP),
             "size": new_value,
             "margin": new_margin,
@@ -313,7 +331,11 @@ def calculate_new_position(current_position, order):
 
     # unpack current
     cs = current_position['side']  # 'buy' or 'sell'
-    cur_amt = float(current_position['amount'])
+    # cur_amt = float(current_position['amount'])
+
+    cur_amt = round(float(current_position["amount"]), QTY_DP)
+    amount = round(float(order["amount"]), QTY_DP)
+
     cur_price = float(current_position['entry_price'])
     cur_margin = float(current_position['margin'])
     # cur_size = float(current_position['size'])
@@ -322,6 +344,7 @@ def calculate_new_position(current_position, order):
     # decide how much to close
     close_amt = cur_amt if not from_order else min(amount, cur_amt)
     logger.info(f"close_amt: {close_amt}")
+    remaining_amount = round(cur_amt - close_amt, QTY_DP)
     # compute PnL for the closed portion
     if cs == 'buy':
         raw_pnl = (price - cur_price) * close_amt
@@ -332,7 +355,8 @@ def calculate_new_position(current_position, order):
     net_pnl = raw_pnl - fee
 
     # full-close
-    if close_amt >= cur_amt:
+    # if close_amt >= cur_amt:
+    if remaining_amount <= 0:
         return {
             "user_id": user_id,
             "symbol": symbol,
@@ -351,38 +375,40 @@ def calculate_new_position(current_position, order):
             "close": True
         }
 
-    # partial-close
-    new_amt = cur_amt - close_amt
-    new_size = new_amt * cur_price
-    new_margin = cur_margin * (new_amt / cur_amt)
+    else:
+        # partial-close
+        # new_amt = cur_amt - close_amt
+        new_amt = remaining_amount
+        new_size = new_amt * cur_price
+        new_margin = cur_margin * (new_amt / cur_amt)
 
-    # recalc liquidation for remaining
-    new_liq = calc_iso_liq_price_from_margin(
-        cur_price,
-        new_margin,
-        new_size,
-        cs
-    )
+        # recalc liquidation for remaining
+        new_liq = calc_iso_liq_price_from_margin(
+            cur_price,
+            new_margin,
+            new_size,
+            cs
+        )
 
-    new_liq = 0 if margin_type == 'cross' else new_liq
+        new_liq = 0 if margin_type == 'cross' else new_liq
 
-    return {
-        "user_id": user_id,
-        "symbol": symbol,
-        "amount": round(new_amt, QTY_DP),
-        "entry_price": round(cur_price, PRICE_DP),
-        "size": round(new_size, PRICE_DP),
-        "margin": round(new_margin, PRICE_DP),
-        "leverage": leverage,
-        "side": cs,
-        "margin_type": margin_type,
-        "pnl": 0,  # unrealized remains zero until closed
-        "close_pnl": round(net_pnl, PRICE_DP),
-        "status": 1,
-        "liq_price": round(new_liq, PRICE_DP),
-        "close_price": price,
-        "partial": True
-    }
+        return {
+            "user_id": user_id,
+            "symbol": symbol,
+            "amount": round(new_amt, QTY_DP),
+            "entry_price": round(cur_price, PRICE_DP),
+            "size": round(new_size, PRICE_DP),
+            "margin": round(new_margin, PRICE_DP),
+            "leverage": leverage,
+            "side": cs,
+            "margin_type": margin_type,
+            "pnl": 0,  # unrealized remains zero until closed
+            "close_pnl": round(net_pnl, PRICE_DP),
+            "status": 1,
+            "liq_price": round(new_liq, PRICE_DP),
+            "close_price": price,
+            "partial": True
+        }
 
 
 def calc_close_pnl(side: str, amount: float, entry: float, close: float) -> float:
@@ -1070,6 +1096,16 @@ class CalculationService(MySQLAdapter):
                     pid = p["pos_id"]
                     E = float(p["entry_price"])
                     S = float(p["amount"])
+                    if S <= 0:
+                        logger.error(
+                            "[LIQ-SKIP] Invalid open position amount. "
+                            "pos_id=%s retri_id=%s symbol=%s amount=%s",
+                            pid,
+                            retri_id,
+                            p.get("symbol"),
+                            S,
+                        )
+                        continue
                     MP = float(p["market_price"])
                     side_sign = 1 if p.get("side") == "buy" else -1
 
@@ -1615,6 +1651,16 @@ class CalculationService(MySQLAdapter):
                 logger.warning(f"this limit order ({order_id}) has already been executed or doesn't exist. Check if the Redis synchronization is functioning properly.")
                 return
 
+            new_amount = float(new_position.get("amount") or 0)
+
+            if new_position.get("status") == 1 and new_amount <= 0:
+                raise ValueError(
+                    "Refusing to persist open position with non-positive amount: "
+                    f"user_id={new_position.get('user_id')}, "
+                    f"symbol={new_position.get('symbol')}, "
+                    f"amount={new_amount}"
+                )
+
             cursor.execute("""
                 UPDATE mocktrade.position_history SET `status` = 2
                 WHERE `status` = 1 AND `user_id` = %s AND `symbol` = %s
@@ -1701,6 +1747,7 @@ class CalculationService(MySQLAdapter):
                     current_id
                 ))
 
+
                 insert_sql = """
                   INSERT INTO mocktrade.position_history
                    (user_id, symbol, size, amount, entry_price,
@@ -1720,6 +1767,7 @@ class CalculationService(MySQLAdapter):
                 ))
 
             else:  # same side or new position
+
                 insert_sql = """
                   INSERT INTO mocktrade.position_history
                    (user_id, symbol, size, amount, entry_price,
@@ -1852,6 +1900,18 @@ class CalculationService(MySQLAdapter):
                 logger.warning(f"this tp/sl order ({order_id}) has already executed or doesn't exist. Check if the Redis sync is properly functioning")
                 return
 
+            # 여기에 추가
+            new_amount = float(new_position.get("amount") or 0)
+
+            if new_position.get("status") == 1 and new_amount <= 0:
+                raise ValueError(
+                    "Refusing to persist open position with non-positive amount: "
+                    f"user_id={new_position.get('user_id')}, "
+                    f"symbol={new_position.get('symbol')}, "
+                    f"amount={new_amount}"
+                )
+
+
             cursor.execute("""
                 UPDATE `mocktrade`.`position_history`
                    SET `status` = 2
@@ -1928,6 +1988,7 @@ class CalculationService(MySQLAdapter):
                     datetime.now(timezone('Asia/Seoul')),
                     current_id
                 ))
+
 
                 cursor.execute("""
                     INSERT INTO mocktrade.position_history (
