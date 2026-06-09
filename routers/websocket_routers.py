@@ -251,6 +251,13 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
                             "pnl": info.get("unrealized_pnl"),
                             "pnl_pct": info.get("unrealized_pnl_pct"),
                             "roi_pct": info.get("roi_pct"),
+                            "side": info["side"],
+                            "amount": info["amount"],
+                            "size": info["size"],
+                            "entry_price": info["entry_price"],
+                            "margin": info["margin"],
+                            "margin_type": info["margin_type"],
+                            "leverage": info["leverage"],
                         })
 
                     except Exception as e:
