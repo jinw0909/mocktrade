@@ -181,6 +181,8 @@ class SettingsService(MySQLAdapter):
             # 5) commit if all went well
             conn.commit()
 
+            self.reload_symbol_cache()
+
             return {
                 "status" : "success",
                 "message": f"total {count} number of precision info added to the symbol table"

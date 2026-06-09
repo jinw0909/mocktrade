@@ -11,6 +11,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from utils.connection_manager import manager
 import redis.asyncio as aioredis
 from utils.connections import MySQLAdapter
+from utils.symbols import symbols as SYMBOL_CFG
 
 router = APIRouter()
 logger = logging.getLogger("pnl_ws")
@@ -243,19 +244,23 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
                     try:
                         info = json.loads(raw)
 
+                        prec = SYMBOL_CFG.get(symbol, {"price": 2, "qty": 3})
+                        PRICE_DP = prec["price"]
+                        QTY_DP = prec["qty"]
+
                         updates.append({
                             "pos_id": info["pos_id"],
                             "symbol": symbol,
-                            "current_price": info.get("market_price"),
-                            "liq_price": info.get("liq_price"),
-                            "pnl": info.get("unrealized_pnl"),
-                            "pnl_pct": info.get("unrealized_pnl_pct"),
-                            "roi_pct": info.get("roi_pct"),
+                            "current_price": round(info.get("market_price") or 0, PRICE_DP),
+                            "liq_price": round(info.get("liq_price") or 0, PRICE_DP),
+                            "pnl": round(info.get("unrealized_pnl") or 0, 2),
+                            "pnl_pct": round(info.get("unrealized_pnl_pct") or 0, 2),
+                            "roi_pct": round(info.get("roi_pct") or 0, 2),
                             "side": info["side"],
-                            "amount": info["amount"],
-                            "size": info["size"],
-                            "entry_price": info["entry_price"],
-                            "margin": info["margin"],
+                            "amount": round(info.get("amount") or 0, QTY_DP),
+                            "size": round(info.get("size") or 0, 2),
+                            "entry_price": round(info.get("entry_price") or 0, PRICE_DP),
+                            "margin": round(info.get("margin") or 0, 2),
                             "margin_type": info["margin_type"],
                             "leverage": info["leverage"],
                         })
@@ -285,8 +290,8 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
                 total_pnl = sum((item.get("pnl") or 0.0) for item in updates)
                 payload = {
                     "data": updates,
-                    "total": total_pnl,
-                    "avbl": available
+                    "total": round(total_pnl, 4),
+                    "avbl": round(available, 2)
                 }
             else:
                 # heartbeat only when there is no data
