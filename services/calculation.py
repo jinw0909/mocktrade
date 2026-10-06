@@ -441,14 +441,24 @@ class CalculationService(MySQLAdapter):
     # 🔽🔽🔽 ADD THIS HELPER 🔽🔽🔽
     async def send_redis_signal(self, retri_id, payload):
         position_redis = await self.get_position_redis()
+
+        payload_json = json.dumps(payload)
+
+
+        # 기존 프론트용
         key = f"signals:{retri_id}"
 
         logger.info(
             "[redis-signal] retri_id=%s key=%s payload=%s",
             retri_id, key, json.dumps(payload, ensure_ascii=False)
         )
-
         await position_redis.set(key, json.dumps(payload))
+
+        # Telegram 서버에는 TP/SL 체결만 전달
+        if payload.get("trigger") == "tp/sl":
+            telegram_key = f"telegram_signals:{retri_id}"
+            await position_redis.set(telegram_key, payload_json)
+
 
     async def close(self):
         logger.info("closing redis connection")

@@ -188,9 +188,9 @@ async def liq_sender(websocket: WebSocket, user_id):
         return
 
 @router.websocket("/{user_id}")
-async def pnl_stream(websocket: WebSocket, user_id: str):
+async def pnl_stream(websocket: WebSocket, user_id: str, client_type: str = "frontend"):
     await websocket.accept()
-    logger.info(f"User {user_id} connected to PnL stream")
+    logger.info(f"User {user_id} connected to PnL stream with client type {client_type}")
 
     last_heartbeat = time.monotonic()
 
@@ -202,7 +202,11 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
             #    Value: JSON string, e.g.
             #      {"trigger": "limit", "order": {...}}
             # -----------------------------
-            signal_key = f"signals:{user_id}"
+            if client_type == "telegram":
+                signal_key = f"telegram_signals:{user_id}"
+            else:
+                signal_key = f"signals:{user_id}"
+
             signal_raw = await position_redis.get(signal_key)
 
             if signal_raw:
@@ -230,6 +234,29 @@ async def pnl_stream(websocket: WebSocket, user_id: str):
 
                 # One-shot signal → delete after sending
                 await position_redis.delete(signal_key)
+
+            # Telegram 서버는 PnL은 보내지 않고 heartbeat만 유지
+            if client_type == "telegram":
+                now = time.monotonic()
+
+                if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                    try:
+                        await websocket.send_json({
+                            "type": "heartbeat"
+                        })
+                        last_heartbeat = now
+                    except WebSocketDisconnect:
+                        logger.info(f"Telegram socket closed for user {user_id}")
+                        break
+                    except Exception:
+                        logger.exception(
+                            f"Error sending Telegram heartbeat to {user_id}"
+                        )
+                        break
+
+                await asyncio.sleep(1.0)
+                continue
+
 
             # -----------------------------
             # 2) PnL updates from positions:{user_id}
