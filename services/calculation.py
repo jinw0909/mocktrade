@@ -457,7 +457,14 @@ class CalculationService(MySQLAdapter):
         # Telegram 서버에는 TP/SL 체결만 전달
         if payload.get("trigger") == "tp/sl":
             telegram_key = f"telegram_signals:{retri_id}"
-            await position_redis.set(telegram_key, payload_json)
+            telegram_payload = {
+                **payload,
+                "user_id": retri_id,
+            }
+            await position_redis.set(
+                telegram_key,
+                json.dumps(telegram_payload, ensure_ascii=False)
+            )
 
 
     async def close(self):
