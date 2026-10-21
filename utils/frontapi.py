@@ -568,36 +568,67 @@ class MySQLAdapter:
                 raise Exception("DB Connection Failed")
 
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                # sql = """
+                #     SELECT
+                #         ph.user_id,
+                #         ph.symbol,
+                #         ph.side,
+                #         ph.margin_type,
+                #         ph.entry_price,
+                #         ph.pnl,
+                #         oh.amount AS close_vol,
+                #         oh.price AS close_price,
+                #         oh.update_time AS close_datetime
+                #     FROM position_history ph
+                #     JOIN (
+                #         SELECT o1.*
+                #         FROM order_history o1
+                #         JOIN (
+                #             SELECT po_id, MAX(insert_time) AS max_insert_time
+                #             FROM order_history
+                #             WHERE status = 1
+                #             GROUP BY po_id
+                #         ) o2
+                #         ON o1.po_id = o2.po_id
+                #         AND o1.insert_time = o2.max_insert_time
+                #         WHERE o1.status = 1
+                #     ) oh
+                #     ON oh.po_id = ph.id
+                #     WHERE ph.user_id = %s
+                #     AND ph.status IN (2, 3)
+                #     AND ph.close_price > 0
+                #     ORDER BY oh.update_time DESC;
+                # """
                 sql = """
-                    SELECT
-                        ph.user_id,
-                        ph.symbol,
-                        ph.side,
-                        ph.margin_type,
-                        ph.entry_price,
-                        ph.pnl,
-                        oh.amount AS close_vol,
-                        oh.price AS close_price,
-                        oh.update_time AS close_datetime
-                    FROM position_history ph
-                    JOIN (
-                        SELECT o1.*
-                        FROM order_history o1
-                        JOIN (
-                            SELECT po_id, MAX(insert_time) AS max_insert_time
-                            FROM order_history
-                            WHERE status = 1
-                            GROUP BY po_id
-                        ) o2
-                        ON o1.po_id = o2.po_id
-                        AND o1.insert_time = o2.max_insert_time
-                        WHERE o1.status = 1
-                    ) oh
+                SELECT
+                    ph.user_id,
+                    ph.symbol,
+                    ph.side,
+                    ph.margin_type,
+                    ph.entry_price,
+                    ph.pnl,
+                    oh.amount AS close_vol,
+                    oh.price AS close_price,
+                    oh.update_time AS close_datetime
+                FROM position_history ph
+                JOIN (
+                    SELECT *
+                    FROM (
+                        SELECT o.*,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY po_id
+                                ORDER BY update_time DESC, id DESC
+                            ) AS rn
+                        FROM order_history o
+                        WHERE status = 1
+                    ) t
+                    WHERE rn = 1
+                ) oh
                     ON oh.po_id = ph.id
-                    WHERE ph.user_id = %s
-                    AND ph.status IN (2, 3)
-                    AND ph.close_price > 0
-                    ORDER BY oh.update_time DESC;
+                WHERE ph.user_id = %s
+                AND ph.status IN (2, 3)
+                AND ph.close_price > 0
+                ORDER BY oh.update_time DESC;
                 """
 
                 cursor.execute(sql, (user_no,))

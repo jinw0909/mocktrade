@@ -1327,7 +1327,7 @@ class MySQLAdapter:
                     if usdt > 0:  # usdt를 사용하는 경우
                         
                         print('여기')
-                        susu=usdt*0.0004
+                        susu=usdt*0.0005
                         usdt=usdt-susu
                         new_usdt = usdt / leverage  # 새로운 USDT 계산
                         new_amount = usdt / price  # 새로운 금액 계산
@@ -1338,7 +1338,7 @@ class MySQLAdapter:
                         
                         print('여기1')
                         usdt=(amount * price)
-                        susu=usdt*0.0004
+                        susu=usdt*0.0005
                         usdt=usdt-susu
                         new_usdt = (amount * price) / leverage -susu # 새로운 USDT 계산
                         new_amount = amount  # 금액은 그대로 사용
@@ -1623,9 +1623,13 @@ class MySQLAdapter:
                                         # new_profit1=new_margin1*profit 
                                         # print('pnl 체크 ---------------------------------------------',new_profit1)    
                                         
-                                        profit=-((price-entry_price)*new_amount)
-                                        new_profit1=profit 
-                                        print('pnl 체크 ---------------------------------------------',new_profit1)   
+                                        # profit=-((price-entry_price)*new_amount)
+                                        # new_profit1=profit 
+                                        # print('pnl 체크 ---------------------------------------------',new_profit1)   
+                                        
+                                        profit = -((price - entry_price) / entry_price) * usdt
+                                        fee = usdt * 0.0005
+                                        new_profit1 = profit - fee
                                         
                                         
                                         
@@ -1707,8 +1711,10 @@ class MySQLAdapter:
                                         # new_profit1=new_margin1*profit 
                                         # print('pnl 체크 ---------------------------------------------',new_profit1)
                                         
-                                        profit=-((price-entry_price)*new_amount)
-                                        new_profit1=profit 
+                                        
+                                        profit = -((price - entry_price) / entry_price) * usdt
+                                        fee = usdt * 0.0005
+                                        new_profit1 = profit - fee
                                         
                                         balance11=self.get_user1(user_no)
                                         new_balance1=balance11+new_profit1
@@ -1857,7 +1863,7 @@ class MySQLAdapter:
                     if usdt > 0:  # usdt를 사용하는 경우
                         
                         print('여기')
-                        susu=usdt*0.0004
+                        susu=usdt*0.0005
                         usdt=usdt-susu
                         new_usdt = usdt / leverage  # 새로운 USDT 계산
                         new_amount = usdt / price  # 새로운 금액 계산
@@ -1868,7 +1874,7 @@ class MySQLAdapter:
                         
                         print('여기1')
                         usdt=(amount * price)
-                        susu=usdt*0.0004
+                        susu=usdt*0.0005
                         usdt=usdt-susu
                         new_usdt = (amount * price) / leverage  # 새로운 USDT 계산
                         new_amount = amount  # 금액은 그대로 사용
@@ -2149,8 +2155,12 @@ class MySQLAdapter:
                                         # new_profit1=new_margin1*profit 
                                         # print('pnl 체크 ---------------------------------------------',new_profit1)    
                                         
-                                        profit=((price-entry_price)*new_amount)
-                                        new_profit1=profit 
+                                        # profit=((price-entry_price)*new_amount)
+                                        # new_profit1=profit 
+                                        profit = ((price - entry_price) / entry_price) * usdt
+                                        fee = usdt * 0.0005
+                                        new_profit1 = profit - fee
+                                        
                                         balance11=self.get_user1(user_no)
                                         new_balance1=balance11+new_profit1
                                         self.update_bal(new_balance1,user_no)      
@@ -2233,8 +2243,12 @@ class MySQLAdapter:
                                         # profit=((price-entry_price)/entry_price)*leverage
                                         # new_profit1=new_margin1*profit 
                                         # print('pnl 체크 ---------------------------------------------',new_profit1)       
-                                        profit=((price-entry_price)*new_amount)
-                                        new_profit1=profit 
+                                        # profit=((price-entry_price)*new_amount)
+                                        # new_profit1=profit 
+                                        
+                                        profit = ((price - entry_price) / entry_price) * usdt
+                                        fee = usdt * 0.0005
+                                        new_profit1 = profit - fee
                                         balance11=self.get_user1(user_no)
                                         new_balance1=balance11+new_profit1
                                         self.update_bal(new_balance1,user_no) 
@@ -2599,76 +2613,157 @@ class MySQLAdapter:
             
             
             
-    def cancel_position(self, user_no, position_id: int,usdt:float=0,close_price=0) :
-        conn = self._get_connection()
-        return_data = dict()
-        check = MakeErrorType()
-        rd = self._get_redis()
-        user = self.get_user(user_no)
-        if user:
-            try:
+    # def cancel_position(self, user_no, position_id: int,usdt:float=0,close_price=0) :
+    #     conn = self._get_connection()
+    #     return_data = dict()
+    #     check = MakeErrorType()
+    #     rd = self._get_redis()
+    #     user = self.get_user(user_no)
+    #     if user:
+    #         try:
                 
                 
-                if conn:
-                    with conn.cursor() as cursor:
+    #             if conn:
+    #                 with conn.cursor() as cursor:
                         
-                        sql = f"SELECT * FROM position_history where id={position_id}"
-                        
-                    
-                    
-                        cursor.execute(sql)
-                        result=cursor.fetchall()
-                        result=pd.DataFrame(result)
+    #                     sql = f"SELECT * FROM position_history where id={position_id}"
                         
                     
-                        conn.close()
+                    
+    #                     cursor.execute(sql)
+    #                     result=cursor.fetchall()
+    #                     result=pd.DataFrame(result)
                         
-                        print(result)
-                        symbol=result['symbol'].iloc[0]
-                        price = rd.get(f'price:{symbol}USDT')
-                        price = float(price.decode())
-                        entry_price= result['entry_price'].iloc[0]
-                        if usdt ==0:
+                    
+    #                     conn.close()
+                        
+    #                     print(result)
+    #                     symbol=result['symbol'].iloc[0]
+    #                     price = rd.get(f'price:{symbol}USDT')
+    #                     price = float(price.decode())
+    #                     entry_price= result['entry_price'].iloc[0]
+    #                     if usdt ==0:
                             
-                            new_usdt=result['margin'].iloc[0]
-                        else:
-                            new_usdt=usdt
-                        new_amount=result['amount'].iloc[0]
-                        margin_type=result['margin_type'].iloc[0]
-                        leverage=result['leverage'].iloc[0]
-                        print(price,entry_price)
+    #                         new_usdt=result['margin'].iloc[0]
+    #                     else:
+    #                         new_usdt=usdt
+    #                     new_amount=result['amount'].iloc[0]
+    #                     margin_type=result['margin_type'].iloc[0]
+    #                     leverage=result['leverage'].iloc[0]
+    #                     print(price,entry_price)
                         
                        
                             
                             
                         
+    #                     if result['side'].iloc[0] == 'buy':
+    #                         print('클로즈 바이')
+    #                         profit=((price-entry_price)/entry_price)*result['leverage'].iloc[0]
+    #                         new_profit=result['margin'].iloc[0]*profit
+    #                         print('profit',profit,'new_profit',new_profit)
+    #                         self.inser_oder_history(user_no, symbol, 'market', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 1,price,0,0,position_id)
+                            
+    #                     else:
+    #                         print('클로즈 셀')
+                            
+    #                         profit=-((price-entry_price)/entry_price)*result['leverage'].iloc[0]
+    #                         new_profit=result['margin'].iloc[0]*profit
+    #                         print('profit',profit,'new_profit',new_profit)
+    #                         self.inser_oder_history(user_no, symbol, 'market', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 1,price,0,0,position_id)
+    #                     self.update_order_tp_sl(symbol,user_no)
+    #                     self.update_close_position(float(new_profit),position_id,price)
+    #                     balance=self.get_user1(user_no)
+    #                     new_balance=balance+new_profit
+    #                     self.update_bal(new_balance,user_no)
+    #                     print(balance,new_balance)
+                
+    #             # self.update_order(position_id)
+    #             self.return_dict_data['results']=[]
+    #             self.return_dict_data['reCode']=0
+    #             self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+    #             self.status_code=200
+                
+    #         except Exception as e:
+    #             print(e)
+    
+    def cancel_position(self, user_no, position_id: int, usdt: float = 0, close_price=0):
+        conn = self._get_connection()
+        return_data = dict()
+        check = MakeErrorType()
+        rd = self._get_redis()
+        user = self.get_user(user_no)
+
+        if user:
+            try:
+                if conn:
+                    with conn.cursor() as cursor:
+                        sql = f"SELECT * FROM position_history WHERE id={position_id}"
+                        cursor.execute(sql)
+                        result = cursor.fetchall()
+                        result = pd.DataFrame(result)
+                        conn.close()
+
+                        print(result)
+                        symbol = result['symbol'].iloc[0]
+                        price = rd.get(f'price:{symbol}USDT')
+                        price = float(price.decode())
+                        entry_price = result['entry_price'].iloc[0]
+
+                        if usdt == 0:
+                            new_usdt = result['margin'].iloc[0]
+                        else:
+                            new_usdt = usdt
+
+                        new_amount = result['amount'].iloc[0]
+                        margin_type = result['margin_type'].iloc[0]
+                        leverage = result['leverage'].iloc[0]
+                        fee_rate = 0.0005  # 0.04%
+
+                        print(price, entry_price)
+
                         if result['side'].iloc[0] == 'buy':
                             print('클로즈 바이')
-                            profit=((price-entry_price)/entry_price)*result['leverage'].iloc[0]
-                            new_profit=result['margin'].iloc[0]*profit
-                            print('profit',profit,'new_profit',new_profit)
-                            self.inser_oder_history(user_no, symbol, 'market', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 1,price,0,0,position_id)
-                            
+                            profit = ((price - entry_price) / entry_price) * leverage
+                            pnl = result['margin'].iloc[0] * profit
+                            fee = new_amount * price * fee_rate
+                            new_profit = pnl - fee
+
+                            print('profit', profit, 'pnl', pnl, 'fee', fee, 'new_profit', new_profit)
+
+                            self.inser_oder_history(
+                                user_no, symbol, 'market', margin_type, 'sell',
+                                price, new_usdt, new_amount, leverage, 1,
+                                price, 0, 0, position_id
+                            )
                         else:
                             print('클로즈 셀')
-                            
-                            profit=-((price-entry_price)/entry_price)*result['leverage'].iloc[0]
-                            new_profit=result['margin'].iloc[0]*profit
-                            print('profit',profit,'new_profit',new_profit)
-                            self.inser_oder_history(user_no, symbol, 'market', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 1,price,0,0,position_id)
-                        self.update_order_tp_sl(symbol,user_no)
-                        self.update_close_position(float(new_profit),position_id,price)
-                        balance=self.get_user1(user_no)
-                        new_balance=balance+new_profit
-                        self.update_bal(new_balance,user_no)
-                        print(balance,new_balance)
-                
-                # self.update_order(position_id)
-                self.return_dict_data['results']=[]
-                self.return_dict_data['reCode']=0
+                            profit = -((price - entry_price) / entry_price) * leverage
+                            pnl = result['margin'].iloc[0] * profit
+                            fee = new_amount * price * fee_rate
+                            new_profit = pnl - fee
+
+                            print('profit', profit, 'pnl', pnl, 'fee', fee, 'new_profit', new_profit)
+
+                            self.inser_oder_history(
+                                user_no, symbol, 'market', margin_type, 'buy',
+                                price, new_usdt, new_amount, leverage, 1,
+                                price, 0, 0, position_id
+                            )
+
+                        self.update_order_tp_sl(symbol, user_no)
+                        self.update_close_position(float(new_profit), position_id, price)
+
+                        balance = self.get_user1(user_no)
+                        new_balance = balance + new_profit
+                        self.update_bal(new_balance, user_no)
+
+                        print(balance, new_balance)
+
+                self.return_dict_data['results'] = []
+                self.return_dict_data['reCode'] = 0
                 self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
-                self.status_code=200
-                
+                self.status_code = 200
+
             except Exception as e:
                 print(e)
     
@@ -3038,78 +3133,159 @@ class MySQLAdapter:
     
     
     
-    def all_cancel_position(self, user_no) :
+    # def all_cancel_position(self, user_no) :
+    #     conn = self._get_connection()
+    #     return_data = dict()
+    #     check = MakeErrorType()
+    #     rd = self._get_redis()
+    #     user = self.get_user(user_no)
+    #     if user:
+    #         try:
+                
+                
+    #             if conn:
+    #                 with conn.cursor() as cursor:
+                        
+    #                     sql = f"SELECT * FROM position_history where user_id={user_no} and status=1"
+                        
+                    
+                    
+    #                     cursor.execute(sql)
+    #                     result=cursor.fetchall()
+    #                     result=pd.DataFrame(result)
+                        
+                    
+    #                     conn.close()
+                        
+    #                     print(result)
+                        
+    #                     if len(result) > 0:
+                            
+    #                         for i in result.iterrows():
+    #                             data=i[1]
+    #                             id=data['id']
+    #                             symbol=data['symbol']
+    #                             price = rd.get(f'price:{symbol}USDT')
+    #                             price = float(price.decode())
+    #                             entry_price= data['entry_price']
+    #                             new_usdt=data['margin']
+    #                             new_amount=data['amount']
+    #                             margin_type=data['margin_type']
+    #                             leverage=data['leverage']
+    #                             print(price,entry_price)
+                                
+                            
+                                    
+                                    
+                                
+    #                             if data['side'] == 'buy':
+    #                                 print('클로즈 바이')
+    #                                 profit=((price-entry_price)/entry_price)*data['leverage']
+    #                                 new_profit=data['margin']*profit
+    #                                 print('profit',profit,'new_profit',new_profit)
+    #                                 self.inser_oder_history(user_no, symbol, 'market', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 1,price,0,0,id)
+                                    
+    #                             else:
+    #                                 print('클로즈 셀')
+                                    
+    #                                 profit=-((price-entry_price)/entry_price)*data['leverage']
+    #                                 new_profit=data['margin']*profit
+    #                                 print('profit',profit,'new_profit',new_profit)
+    #                                 self.inser_oder_history(user_no, symbol, 'market', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 1,price,0,0,id)
+    #                             self.update_order_tp_sl(symbol,user_no)
+    #                             self.update_close_position(float(new_profit),id,price)
+    #                             balance=self.get_user1(user_no)
+    #                             new_balance=balance+new_profit
+    #                             self.update_bal(new_balance,user_no)
+    #                             print(balance,new_balance)
+                
+    #             # self.update_order(position_id)
+    #             self.return_dict_data['results']=[]
+    #             self.return_dict_data['reCode']=0
+    #             self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
+    #             self.status_code=200
+                
+    #         except Exception as e:
+    #             print(e)
+    
+    def all_cancel_position(self, user_no):
         conn = self._get_connection()
         return_data = dict()
         check = MakeErrorType()
         rd = self._get_redis()
         user = self.get_user(user_no)
+
         if user:
             try:
-                
-                
                 if conn:
                     with conn.cursor() as cursor:
-                        
-                        sql = f"SELECT * FROM position_history where user_id={user_no} and status=1"
-                        
-                    
-                    
+                        sql = f"SELECT * FROM position_history WHERE user_id={user_no} AND status=1"
                         cursor.execute(sql)
-                        result=cursor.fetchall()
-                        result=pd.DataFrame(result)
-                        
-                    
+                        result = cursor.fetchall()
+                        result = pd.DataFrame(result)
                         conn.close()
-                        
+
                         print(result)
-                        
+
                         if len(result) > 0:
-                            
                             for i in result.iterrows():
-                                data=i[1]
-                                id=data['id']
-                                symbol=data['symbol']
+                                data = i[1]
+                                id = data['id']
+                                symbol = data['symbol']
                                 price = rd.get(f'price:{symbol}USDT')
                                 price = float(price.decode())
-                                entry_price= data['entry_price']
-                                new_usdt=data['margin']
-                                new_amount=data['amount']
-                                margin_type=data['margin_type']
-                                leverage=data['leverage']
-                                print(price,entry_price)
-                                
-                            
-                                    
-                                    
-                                
+                                entry_price = data['entry_price']
+                                new_usdt = data['margin']
+                                new_amount = data['amount']
+                                margin_type = data['margin_type']
+                                leverage = data['leverage']
+                                fee_rate = 0.0005  # 0.04%
+
+                                print(price, entry_price)
+
                                 if data['side'] == 'buy':
                                     print('클로즈 바이')
-                                    profit=((price-entry_price)/entry_price)*data['leverage']
-                                    new_profit=data['margin']*profit
-                                    print('profit',profit,'new_profit',new_profit)
-                                    self.inser_oder_history(user_no, symbol, 'market', margin_type, 'sell', price, new_usdt ,new_amount, leverage, 1,price,0,0,id)
-                                    
+                                    profit = ((price - entry_price) / entry_price) * leverage
+                                    pnl = data['margin'] * profit
+                                    fee = new_amount * price * fee_rate
+                                    new_profit = pnl - fee
+
+                                    print('profit', profit, 'pnl', pnl, 'fee', fee, 'new_profit', new_profit)
+
+                                    self.inser_oder_history(
+                                        user_no, symbol, 'market', margin_type, 'sell',
+                                        price, new_usdt, new_amount, leverage, 1,
+                                        price, 0, 0, id
+                                    )
                                 else:
                                     print('클로즈 셀')
-                                    
-                                    profit=-((price-entry_price)/entry_price)*data['leverage']
-                                    new_profit=data['margin']*profit
-                                    print('profit',profit,'new_profit',new_profit)
-                                    self.inser_oder_history(user_no, symbol, 'market', margin_type, 'buy', price, new_usdt ,new_amount, leverage, 1,price,0,0,id)
-                                self.update_order_tp_sl(symbol,user_no)
-                                self.update_close_position(float(new_profit),id,price)
-                                balance=self.get_user1(user_no)
-                                new_balance=balance+new_profit
-                                self.update_bal(new_balance,user_no)
-                                print(balance,new_balance)
-                
-                # self.update_order(position_id)
-                self.return_dict_data['results']=[]
-                self.return_dict_data['reCode']=0
+                                    profit = -((price - entry_price) / entry_price) * leverage
+                                    pnl = data['margin'] * profit
+                                    fee = new_amount * price * fee_rate
+                                    new_profit = pnl - fee
+
+                                    print('profit', profit, 'pnl', pnl, 'fee', fee, 'new_profit', new_profit)
+
+                                    self.inser_oder_history(
+                                        user_no, symbol, 'market', margin_type, 'buy',
+                                        price, new_usdt, new_amount, leverage, 1,
+                                        price, 0, 0, id
+                                    )
+
+                                self.update_order_tp_sl(symbol, user_no)
+                                self.update_close_position(float(new_profit), id, price)
+
+                                balance = self.get_user1(user_no)
+                                new_balance = balance + new_profit
+                                self.update_bal(new_balance, user_no)
+
+                                print(balance, new_balance)
+
+                self.return_dict_data['results'] = []
+                self.return_dict_data['reCode'] = 0
                 self.return_dict_data['message'] = check.error(self.return_dict_data['reCode'])
-                self.status_code=200
-                
+                self.status_code = 200
+
             except Exception as e:
                 print(e)
     
